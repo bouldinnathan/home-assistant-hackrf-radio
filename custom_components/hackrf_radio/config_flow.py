@@ -95,7 +95,9 @@ class HackRFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required("name", default="HackRF Radio"): str,
             vol.Required("serial"): SelectSelector(SelectSelectorConfig(options=options)),
             vol.Required("acknowledge_input_safety", default=False): bool,
-        }), errors=errors)
+        }), errors=errors, description_placeholders={
+            "hardware_guidance_url": "https://hackrf.readthedocs.io/en/latest/hackrf_one.html#maximum-input-power",
+        })
 
     async def async_step_reauth(self, entry_data):
         return await self.async_step_reauth_confirm()

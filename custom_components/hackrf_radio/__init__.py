@@ -7,6 +7,17 @@ from pathlib import Path
 from .const import DOMAIN, PLATFORMS, VERSION
 
 
+def _config_schema(config):
+    # Keep Home Assistant imports lazy so the standalone USB bridge needs only
+    # aiohttp, while declaring UI-only configuration to HA and hassfest.
+    from homeassistant.helpers import config_validation as cv
+
+    return cv.config_entry_only_config_schema(DOMAIN)(config)
+
+
+CONFIG_SCHEMA = _config_schema
+
+
 async def async_setup(hass, config) -> bool:
     from homeassistant.components import panel_custom
     from homeassistant.components.http import StaticPathConfig

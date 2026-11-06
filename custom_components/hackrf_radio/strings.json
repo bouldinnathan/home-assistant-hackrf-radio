@@ -24,7 +24,7 @@
       },
       "device": {
         "title": "Select and protect your radio",
-        "description": "Receive-only monitoring. RF amplifier and antenna bias power are locked OFF. Keep HackRF One input below -5 dBm; use appropriate attenuation and DC blocking for the connected equipment. Relative FFT readings cannot enforce that physical limit. Initial setup does not flash firmware. Reviewed firmware maintenance is a separate admin workflow. See https://hackrf.readthedocs.io/en/latest/hackrf_one.html#maximum-input-power",
+        "description": "Receive-only monitoring. RF amplifier and antenna bias power are locked OFF. Keep HackRF One input below -5 dBm; use appropriate attenuation and DC blocking for the connected equipment. Relative FFT readings cannot enforce that physical limit. Initial setup does not flash firmware. Reviewed firmware maintenance is a separate admin workflow. See [hardware guidance]({hardware_guidance_url}).",
         "data": {
           "name": "Name",
           "serial": "Exact hardware serial number",
