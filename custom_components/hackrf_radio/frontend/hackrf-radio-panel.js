@@ -36,6 +36,9 @@ class HackRFRadioPanel extends HTMLElement {
     this._appsKey = null;
     this._packagePlanId = null;
     this._appActing = false;
+    this._view = "spectrum";
+    this._logBefore = 0;
+    this._logRequest = (this._logRequest || 0) + 1;
     this._mount();
     this._observer = new ResizeObserver(() => this._draw());
     this._observer.observe(this.shadowRoot.querySelector(".plots"));
@@ -55,10 +58,11 @@ class HackRFRadioPanel extends HTMLElement {
         .layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px}.card{padding:20px}.card h3{font-size:15px;margin:0 0 14px;font-weight:600}.plothead{display:flex;align-items:center;justify-content:space-between;gap:12px}.badge{font-size:11px;color:var(--primary-color,#6bd6cc);background:var(--secondary-background-color,#20323a);padding:6px 9px;border-radius:20px}.plots{min-width:0}canvas{width:100%;display:block}#spectrum{height:290px}#waterfall{height:180px;background:#101725;border-radius:6px}.legend{font-size:11px;display:flex;justify-content:space-between;gap:10px;color:var(--secondary-text-color,#9aaabd);margin:10px 0 16px}
         .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}button.action{border:1px solid var(--divider-color,#344255);border-radius:7px;background:var(--secondary-background-color,#253144);padding:10px 13px}.primary{background:var(--primary-color,#6bd6cc)!important;color:var(--text-primary-color,#102322)!important;border-color:transparent!important}#stop{border-color:#bb715a;color:var(--error-color,#efa68e)}
         .firmware-card{margin-top:16px}.firmware-card p,.firmware-card label{font-size:12px}.firmware-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.check{display:flex;align-items:flex-start;gap:8px;margin:12px 0;line-height:1.5}.check input{width:auto;margin:2px 0 0}.firmware-card a{color:var(--primary-color,#6bd6cc)}
-        .view-tabs{display:flex;gap:8px;margin-bottom:18px}.view-tabs [aria-selected=true]{border-color:var(--primary-color,#6bd6cc);color:var(--primary-color,#6bd6cc)}.app-tools{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.software-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.software-card{display:flex;flex-direction:column;gap:9px}.software-card h3{margin:0}.software-card p{font-size:13px;flex:1}.software-card small{color:var(--secondary-text-color,#9aaabd)}.software-card a,#apps-view a{color:var(--primary-color,#6bd6cc)}#apps-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.software-links{display:flex;flex-wrap:wrap;gap:14px}.software-card .check{margin:0}.app-header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}#owner-status{padding:12px;border-left:3px solid var(--primary-color,#6bd6cc);margin-bottom:16px}.software-card .action{align-self:flex-start}
+        .view-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}.view-tabs [aria-selected=true]{border-color:var(--primary-color,#6bd6cc);color:var(--primary-color,#6bd6cc)}.app-tools{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.software-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.software-card{display:flex;flex-direction:column;gap:9px}.software-card h3{margin:0}.software-card p{font-size:13px;flex:1}.software-card small{color:var(--secondary-text-color,#9aaabd)}.software-card a,#apps-view a{color:var(--primary-color,#6bd6cc)}#apps-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.software-links{display:flex;flex-wrap:wrap;gap:14px}.software-card .check{margin:0}.app-header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}#owner-status{padding:12px;border-left:3px solid var(--primary-color,#6bd6cc);margin-bottom:16px}.software-card .action{align-self:flex-start}
         form{display:grid;gap:14px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:7px;font-size:12px;color:var(--secondary-text-color,#9aaabd)}.help{font-size:12px}.safety{margin-top:16px;border-left:3px solid var(--primary-color,#6bd6cc);padding:12px 14px;background:var(--secondary-background-color,#20303b);border-radius:4px;font-size:12px;line-height:1.6}.safety strong{display:block}.safety a{color:var(--primary-color,#6bd6cc)}.details{margin-top:16px;font-size:12px;overflow-wrap:anywhere}.error{background:var(--error-color,#b74747);color:white;padding:12px 16px;border-radius:8px;margin-bottom:16px}.empty{padding:45px;text-align:center}.notice{color:var(--warning-color,#e7b969);font-size:12px;margin-top:10px}[hidden]{display:none!important}:focus-visible{outline:2px solid var(--primary-color,#6bd6cc);outline-offset:3px}
         @media(max-width:1000px){.layout{grid-template-columns:1fr}.settings{max-width:none}form{grid-template-columns:1fr 1fr}form h3,form .pair,form button,form .help{grid-column:1/-1}}
         @media(max-width:600px){main{padding:14px}header{padding:0 10px}header span{display:none}.top{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat{padding:12px}.value{font-size:21px}.card{padding:14px}#spectrum{height:220px}h2{font-size:23px}form{grid-template-columns:1fr}form>*{grid-column:1/-1}.app-tools{grid-template-columns:1fr}.app-header{align-items:flex-start;flex-direction:column}}
+        .log-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:16px}.log-tools label{min-width:130px;flex:1}.log-entry{border-bottom:1px solid var(--divider-color,#344255);padding:12px 0;overflow-wrap:anywhere}.log-entry small{color:var(--secondary-text-color,#9aaabd)}.log-entry[data-level=error]{border-left:3px solid var(--error-color,#efaaaa);padding-left:10px}.log-entry[data-level=warning]{border-left:3px solid var(--warning-color,#e7b969);padding-left:10px}.log-entry pre,#setup-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}#setup-view .card{margin-bottom:16px}#setup-view a{color:var(--primary-color,#6bd6cc)}#logs-view [role=log]{max-height:65vh;overflow:auto}.integration-result{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
       </style>
       <header><button class="menu" aria-label="Open sidebar">☰</button><h1>HackRF Radio</h1><span>Local spectrum monitor</span></header>
       <main>
@@ -66,7 +70,7 @@ class HackRFRadioPanel extends HTMLElement {
         <div id="error" class="error" role="alert" hidden></div>
         <div id="empty" class="card empty" hidden><h3>Add your HackRF</h3><p>Open Settings → Devices & services → Add integration → HackRF Radio.</p><p>Use the bridge for Home Assistant OS, or local USB where the HackRF tools are installed.</p><a href="/config/integrations/dashboard/add?domain=hackrf_radio">Set up HackRF Radio</a></div>
         <section id="workspace">
-          <nav class="view-tabs" aria-label="Radio workspace"><button class="action" id="show-spectrum" aria-selected="true">Spectrum & firmware</button><button class="action" id="show-apps" aria-selected="false">Apps & direct control</button></nav>
+          <nav class="view-tabs" aria-label="Radio workspace"><button class="action" id="show-spectrum" aria-selected="true">Spectrum & firmware</button><button class="action" id="show-apps" aria-selected="false">Apps & your code</button><button class="action" id="show-setup" aria-selected="false">Connecting & integrations</button><button class="action" id="show-logs" aria-selected="false">Activity & logs</button></nav>
           <div id="spectrum-view">
           <div class="stats">
             <div class="stat"><small>Receiver</small><div class="value" id="status">Connecting</div></div>
@@ -118,6 +122,7 @@ class HackRFRadioPanel extends HTMLElement {
           </div>
           <section id="apps-view" hidden>
             <div id="owner-status" role="status" aria-live="polite">Home Assistant controls the USB host.</div>
+            <div class="card" style="margin-bottom:16px"><h3>Your code and results</h3><p>USB-host program profiles appear in the application selector below. Start and stop your programs here or through Home Assistant automations. Programs can optionally publish measurements to the Custom result sensor and the hackrf_radio_result event.</p><pre id="program-status"></pre><pre class="integration-result" id="program-result">No custom measurements received.</pre><button class="action" id="program-logs">View program logs</button></div>
             <div class="app-tools">
               <div class="card"><h3>External app control</h3>
                 <label>Application<select id="external-app"></select></label>
@@ -127,6 +132,7 @@ class HackRFRadioPanel extends HTMLElement {
                 <button class="action" id="app-release">Return control to HA</button>
                 <p class="help">Handoff pauses HA scans, capture and firmware operations across this USB host. Ownership never expires automatically. Desktop launch requires an opted-in desktop bridge; headless HA cannot display a desktop app.</p>
                 <pre id="soapy-connection"></pre>
+                <p class="help">Offline profiles must avoid direct USB access. Custom programs run as an unprivileged host account; commands are configured on that host. The browser sends a profile ID.</p>
               </div>
               <div class="card"><h3>Direct receive capture</h3>
                 <form id="capture-form">
@@ -149,6 +155,18 @@ class HackRFRadioPanel extends HTMLElement {
             <div class="app-header"><h3>HackRF software library</h3><label>Filter apps<input id="app-search" type="search" placeholder="Receiver, analysis, satellite…"></label></div>
             <div class="software-grid" id="software-catalog"></div>
           </section>
+          <section id="setup-view" hidden>
+            <div class="card"><h3>Connection checklist</h3><pre id="connection-checks"></pre><ol><li>Connect a HackRF using a USB data cable. On a Mayhem PortaPack, select HackRF from the device menu.</li><li>For HA OS, run the Linux USB bridge. HACS does not install native USB tools into HA OS.</li><li>Configure the bridge token, actual USB device path and LAN bind address in .env, then run Docker Compose.</li><li>Add HackRF Radio in Settings → Devices & services. Choose USB bridge, enter its HTTP(S) URL and administrative token, then select the exact serial.</li><li>Choose Sweep now first. Monitoring stays off after setup, reconnection or restart until explicitly started.</li></ol><p>Local USB requires compatible tools and USB permissions inside the HA runtime. Close competing SDR apps. If a reset changes the Docker USB device number, update the mapping after firmware readback has finished.</p><a href="https://github.com/bouldinnathan/home-assistant-hackrf-radio#connecting-the-usb-device" target="_blank" rel="noopener noreferrer">Complete bridge and connection instructions ↗</a></div>
+            <div class="card"><h3>Run your own code or system</h3><p>On a native USB-host bridge, pass --custom-programs /absolute/path/programs.json. In local USB mode, use /config/hackrf_radio_programs.json. Profile files are controlled by the host operator; restart the bridge after initial configuration. No Home Assistant package is needed on a remote bridge host.</p><pre id="profile-example"></pre><p>Use access: "usb" for a decoder that directly opens the radio; HA hands over USB before launch. Use access: "offline" for file analysis or an HTTP API client, which must avoid direct USB access. Programs receive HACKRF_SERIAL and fixed arguments. Credentials are removed from inherited environment variables; configure any required receive credential in a protected file read by your code.</p><p>With publish_results enabled, print one JSON object per line: {"hackrf_radio_result":{"temperature_c":21.5,"signal":"detected"}}. Results become HA sensor attributes and hackrf_radio_result events. Leave this option off for standalone processing. External programs control their own RF settings.</p></div>
+            <div class="card"><h3>Automations and optional integrations</h3><p>Use Settings → Automations & scenes → Create automation → Add action and search HackRF Radio. Actions support sweeps, I/Q capture, monitoring, configuration, saved presets, app launch/stop, USB handoff/return, custom results and log queries. Choose a time trigger to schedule a scan or recording. Monitoring must first be explicitly armed; an automation that calls the monitoring action is an explicit start.</p><p>Use the hackrf_radio_result event with Node-RED, or forward selected measurements using Home Assistant's MQTT, webhook or notification actions. These adapters are optional and use your existing HA integrations. Do not automatically restart programs or resume monitoring after a failure.</p><pre id="automation-example"></pre><p>The direct receive HTTP API also works without HA. Give scripts the separate receive token. Live SDR streaming uses optional SoapyRemote, which needs its own trusted VPN/firewall configuration.</p></div>
+            <div class="card"><h3>Saved receive profiles</h3><label>Profile name<input id="saved-preset-name" maxlength="60" placeholder="Garden sensors"></label><div class="actions"><button class="action" id="preset-save">Save current settings</button></div><label>Saved profile<select id="saved-preset"></select></label><div class="actions"><button class="action" id="preset-apply">Apply saved profile</button><button class="action" id="preset-delete">Delete saved profile</button></div><p>Applying stops monitoring and clears the old spectrum. It does not start the radio.</p></div>
+          </section>
+          <section id="logs-view" hidden>
+            <div class="card"><h3>Activity & logs</h3><p>Persistent bounded history with UTC timestamps, operation IDs and credential redaction. Program stdout/stderr is captured with line-size and rate limits. Review exported logs before sharing; custom code may print private application data.</p>
+              <div class="log-tools"><label>Source<select id="log-source"><option value="home_assistant">Home Assistant</option><option value="usb_host">USB host & programs</option></select></label><label>Level<select id="log-level"><option value="all">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Information</option><option value="debug">Debug / program output</option></select></label><label>Search<input id="log-search" type="search" maxlength="120" placeholder="Event or message"></label><button class="action" id="log-refresh">Refresh</button><button class="action" id="log-export">Download filtered JSON</button></div>
+              <label class="check"><input id="log-auto" type="checkbox" checked>Refresh while this view is open</label><p id="log-status" role="status"></p><div id="activity-records" role="log" aria-label="Activity history"></div><button class="action" id="log-older">Load older records</button>
+            </div>
+          </section>
         </section>
       </main>`;
     const root = this.shadowRoot;
@@ -160,14 +178,19 @@ class HackRFRadioPanel extends HTMLElement {
       this._firmwareKey = null; this._firmwarePlanId = null;
       this._appsKey = null;
       this._packagePlanId = null;
+      this._logBefore = 0; this._logRequest += 1;
+      root.querySelector("#activity-records").replaceChildren();
       this._load(this._generation).catch((error) => this._error(error.message));
     };
     for (const action of ["sweep", "start", "stop"]) root.querySelector(`#${action}`).onclick = () => this._control(action);
     for (const action of ["prepare", "install", "verify"]) root.querySelector(`#firmware-${action}`).onclick = () => this._firmware(action);
-    for (const view of ["spectrum", "apps"]) root.querySelector(`#show-${view}`).onclick = () => {
-      root.querySelector("#spectrum-view").hidden = view !== "spectrum";
-      root.querySelector("#apps-view").hidden = view !== "apps";
-      for (const name of ["spectrum", "apps"]) root.querySelector(`#show-${name}`).setAttribute("aria-selected", String(name === view));
+    for (const view of ["spectrum", "apps", "setup", "logs"]) root.querySelector(`#show-${view}`).onclick = () => {
+      this._view = view;
+      for (const name of ["spectrum", "apps", "setup", "logs"]) {
+        root.querySelector(`#${name}-view`).hidden = view !== name;
+        root.querySelector(`#show-${name}`).setAttribute("aria-selected", String(name === view));
+      }
+      if (view === "logs") this._loadActivity();
       this._draw();
     };
     for (const action of ["handoff", "launch", "stop", "release"]) root.querySelector(`#app-${action}`).onclick = () => {
@@ -176,6 +199,17 @@ class HackRFRadioPanel extends HTMLElement {
       this._applications(action, values);
     };
     for (const id of ["external-app", "external-confirm", "external-closed", "packages-confirm"]) root.querySelector(`#${id}`).onchange = () => this._buttons();
+    root.querySelector("#program-logs").onclick = () => {
+      root.querySelector("#log-source").value = "usb_host";
+      root.querySelector("#show-logs").click();
+    };
+    root.querySelector("#log-refresh").onclick = () => this._loadActivity();
+    root.querySelector("#log-older").onclick = () => { root.querySelector("#log-auto").checked = false; this._loadActivity(true); };
+    root.querySelector("#log-export").onclick = () => this._exportActivity();
+    for (const id of ["log-source", "log-level"]) root.querySelector(`#${id}`).onchange = () => this._loadActivity();
+    root.querySelector("#log-search").onchange = () => this._loadActivity();
+    for (const action of ["save", "apply", "delete"]) root.querySelector(`#preset-${action}`).onclick = () => this._savedPreset(action);
+    root.querySelector("#profile-example").textContent = JSON.stringify([{ id: "user_decoder", name: "My decoder", argv: ["/home/radio/venv/bin/python", "/home/radio/decoder.py", "--serial", "{serial}"], access: "usb", publish_results: true }], null, 2);
     root.querySelector("#app-search").oninput = () => this._filterApps();
     root.querySelector("#packages-prepare").onclick = () => this._applications("prepare_install", { apps: [...root.querySelectorAll("[data-install-app]:checked")].map((input) => input.dataset.installApp) });
     root.querySelector("#packages-install").onclick = () => this._applications("install", { plan_id: this._data?.applications?.plan?.plan_id, confirmed: root.querySelector("#packages-confirm").checked });
@@ -217,6 +251,7 @@ class HackRFRadioPanel extends HTMLElement {
   async _tick(generation) {
     try { await this._load(generation); }
     catch (error) { if (generation === this._generation) this._error(error.message || "Cannot load HackRF status"); }
+    if (generation === this._generation && this._view === "logs" && this.shadowRoot.querySelector("#log-auto").checked) await this._loadActivity();
     if (generation === this._generation && this.isConnected) this._timer = setTimeout(() => this._tick(generation), 3000);
   }
 
@@ -290,7 +325,7 @@ class HackRFRadioPanel extends HTMLElement {
     root.querySelector("#firmware-verify").disabled = Boolean(this._fwActing || firmware.active || external || packagesBusy || this._appActing);
     const app = (apps.catalog || []).find((entry) => entry.id === root.querySelector("#external-app").value);
     root.querySelector("#app-handoff").disabled = busy || apps.available === false || !app || !root.querySelector("#external-confirm").checked;
-    root.querySelector("#app-launch").disabled = root.querySelector("#app-handoff").disabled || !apps.launch_enabled || !app?.installed || !app?.launch?.length;
+    root.querySelector("#app-launch").disabled = root.querySelector("#app-handoff").disabled || apps.running || !(app?.launch_enabled ?? apps.launch_enabled) || !app?.installed || !app?.launch?.length;
     root.querySelector("#app-stop").disabled = !apps.running || this._appActing;
     root.querySelector("#app-release").disabled = !external || apps.running || apps.owner?.serial !== this._data?.serial || !root.querySelector("#external-closed").checked || this._appActing;
     root.querySelector("#packages-prepare").disabled = busy || !root.querySelectorAll("[data-install-app]:checked").length;
@@ -436,7 +471,7 @@ class HackRFRadioPanel extends HTMLElement {
       this._appsKey = key;
       const selected = root.querySelector("#external-app").value;
       root.querySelector("#external-app").replaceChildren(...catalog.map((app) => new Option(app.name, app.id)));
-      if (catalog.some((app) => app.id === selected)) root.querySelector("#external-app").value = selected;
+      root.querySelector("#external-app").value = catalog.some((app) => app.id === selected) ? selected : catalog[0]?.id || "";
       root.querySelector("#software-catalog").replaceChildren(...catalog.map((app) => {
         const card = document.createElement("article"); card.className = "card software-card";
         const title = document.createElement("h3"); title.textContent = app.name;
@@ -469,6 +504,9 @@ class HackRFRadioPanel extends HTMLElement {
     root.querySelector("#package-plan").textContent = plan ? `${plan.commands.map((command) => command.join(" ")).join("\n")}\n\n${plan.service_policy}\nExpires: ${new Date(plan.expires_at * 1000).toLocaleTimeString()}` : "Select package-backed apps to review an installation plan.";
     root.querySelector("#installer-status").textContent = `${apps.installer?.phase || "idle"} · ${apps.installer?.message || (apps.install_enabled ? "Managed package installation is enabled on this USB host." : "Managed install is disabled. Use the reviewed recipe on a Debian/Ubuntu USB host, or an upstream installer on your computer.")}`;
     root.querySelector("#soapy-connection").textContent = `SoapyRemote client device args (native USB-host bridge):\ndriver=remote,remote=${apps.soapy_bind || "127.0.0.1"}:55132,remote:driver=hackrf,remote:serial=${data.serial},remote:prot=tcp\nLoopback is the default. Remote streaming needs an explicitly configured private bind IP, trusted VPN/firewall, and access to negotiated stream ports. A single-port SSH tunnel is insufficient.`;
+    const running = apps.running ? `Running: ${apps.running_app || "managed program"}` : "No managed program is running.";
+    root.querySelector("#program-status").textContent = `${running}${apps.last_exit ? `\nLast exit: ${apps.last_exit.app_id}, code ${apps.last_exit.returncode}` : ""}`;
+    root.querySelector("#program-result").textContent = data.result ? `${data.result.source} · ${data.result.timestamp}\n${JSON.stringify(data.result.data, null, 2)}` : "No custom measurements received.";
     const capture = data.capture;
     root.querySelector("#capture-info").textContent = capture ? `${capture.byte_count} bytes · ${capture.format} · ${capture.settings.sample_rate / 1e6} Msps\nCenter ${capture.settings.frequency_hz} Hz · ${capture.captured_at}\nSHA256: ${capture.sha256}` : "No capture yet. The latest four completed captures are retained on the USB host.";
   }
@@ -499,10 +537,74 @@ class HackRFRadioPanel extends HTMLElement {
     const device = data.device;
     set("device", device ? `${device.model} · ${device.revision}\nFirmware ${device.firmware} · API ${device.api}\nSerial ${data.serial}` : "Device details unavailable");
     set("warning", device?.warning || "");
+    root.querySelector("#connection-checks").textContent = `Transport: ${data.transport || "configured"}\nConnection: ${data.connected ? "accessible" : "check connection or external USB ownership"}\nSerial: ${data.serial}\nFirmware: ${data.device?.firmware || "unavailable"}\nUSB owner: ${data.applications?.owner?.name || data.applications?.owner?.phase || "Home Assistant"}\nFirmware maintenance: ${data.firmware?.phase || "unavailable"}\nManaged launch: ${data.applications?.launch_enabled ? "enabled" : "disabled"}`;
+    root.querySelector("#automation-example").textContent = `action: hackrf_radio.application\ndata:\n  entry_id: ${data.entry_id}\n  action: launch\n  app_id: user_decoder\n  confirmed: true`;
+    const saved = root.querySelector("#saved-preset"), savedName = saved.value;
+    saved.replaceChildren(...Object.keys(data.user_presets || {}).map((name) => new Option(name, name)));
+    if (Object.hasOwn(data.user_presets || {}, savedName)) saved.value = savedName;
     this._updateFirmware(data);
     this._updateApps(data);
     if ((data.applications?.owner?.phase || "home_assistant") !== "home_assistant") set("status", "External app");
     this._buttons(); this._draw();
+  }
+
+  async _savedPreset(action) {
+    if (!this._selected) return;
+    const root = this.shadowRoot, entry = this._selected, generation = this._generation;
+    const name = action === "save" ? root.querySelector("#saved-preset-name").value : root.querySelector("#saved-preset").value;
+    try {
+      const data = await this._hass.callWS({ type: "hackrf_radio/preset", entry_id: entry, action, name });
+      if (generation === this._generation && entry === this._selected) this._update(data);
+    } catch (error) { if (generation === this._generation && entry === this._selected) this._error(error.message || "Preset action failed"); }
+  }
+
+  _logFilters(before = 0) {
+    const root = this.shadowRoot;
+    return { source: root.querySelector("#log-source").value, level: root.querySelector("#log-level").value, search: root.querySelector("#log-search").value, before, limit: 200 };
+  }
+
+  async _loadActivity(older = false) {
+    if (!this._selected) return;
+    const requestId = (this._logRequest || 0) + 1; this._logRequest = requestId;
+    const entry = this._selected, generation = this._generation, root = this.shadowRoot;
+    try {
+      const filters = this._logFilters(older ? this._logBefore || 0 : 0);
+      const data = await this._hass.callWS({ type: "hackrf_radio/activity", entry_id: entry, ...filters });
+      if (requestId !== this._logRequest || entry !== this._selected || generation !== this._generation) return;
+      const records = Array.isArray(data.records) ? data.records : [];
+      this._logBefore = data.next_before || 0;
+      const container = root.querySelector("#activity-records");
+      if (!older) container.replaceChildren();
+      for (const record of records) {
+        const item = document.createElement("article"); item.className = "log-entry"; item.dataset.level = record.level;
+        const label = document.createElement("small"); label.textContent = `${record.timestamp} · ${record.level} · ${record.event}${record.operation_id ? ` · ${record.operation_id}` : ""}`;
+        const message = document.createElement("div"); message.textContent = record.message;
+        item.append(label, message);
+        if (record.details) { const details = document.createElement("pre"); details.textContent = JSON.stringify(record.details); item.append(details); }
+        container.append(item);
+      }
+      root.querySelector("#log-status").textContent = data.storage_error || `${container.children.length} records shown · retention ${data.retention || 0} per source · newest first`;
+      root.querySelector("#log-older").disabled = !this._logBefore || !records.length;
+    } catch (error) { if (requestId === this._logRequest && entry === this._selected && generation === this._generation) root.querySelector("#log-status").textContent = error.message || "Cannot read activity history"; }
+  }
+
+  async _exportActivity() {
+    if (!this._selected) return;
+    const entry = this._selected, generation = this._generation;
+    const records = [], filters = this._logFilters();
+    let before = 0, storageError = null;
+    try {
+      for (let page = 0; page < 32 && records.length < 2000; page++) {
+        const data = await this._hass.callWS({ type: "hackrf_radio/activity", entry_id: entry, ...filters, before, limit: 500 });
+        if (entry !== this._selected || generation !== this._generation) return;
+        storageError = data.storage_error || storageError;
+        if (!data.records?.length) break;
+        records.push(...data.records);
+        if (!data.next_before || data.next_before === before) break;
+        before = data.next_before;
+      }
+      this._downloadBlob(new Blob([JSON.stringify({ source: filters.source, exported_at: new Date().toISOString(), storage_error: storageError, records }, null, 2)], { type: "application/json" }), "hackrf-activity.json");
+    } catch (error) { if (entry === this._selected && generation === this._generation) this.shadowRoot.querySelector("#log-status").textContent = error.message || "Cannot export activity"; }
   }
 
   _context(id) {

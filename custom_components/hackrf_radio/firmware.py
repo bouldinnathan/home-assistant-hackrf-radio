@@ -301,6 +301,7 @@ class FirmwareManager:
 
     async def _save(self, serial: str, phase: str, message: str, **values) -> None:
         self._states[serial] = self._states[serial] | {"phase": phase, "message": message} | values
+        await self.radio.activity.record("firmware." + phase, message, level="error" if phase in {"failed", "recovery_required"} else "info")
         await asyncio.to_thread(_durable_json, self._journal(serial), self._states[serial])
 
     async def _write(self, args: list[str]) -> None:
@@ -309,9 +310,15 @@ class FirmwareManager:
             process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         except OSError as err:
             raise RadioError("Could not start the flashing tool") from err
+        tail = bytearray()
+        truncated = False
         async def consume():
-            while await process.stdout.read(65536):
-                pass
+            nonlocal truncated
+            while chunk := await process.stdout.read(65536):
+                tail.extend(chunk)
+                if len(tail) > 1000:
+                    truncated = True
+                    del tail[:-1000]
             return await process.wait()
         task = asyncio.create_task(consume())
         # The background job is not tied to a browser request. If an external
@@ -325,6 +332,10 @@ class FirmwareManager:
                     task = asyncio.create_task(consume())
                 continue
         if code:
+            from .activity import diagnostic_output
+
+            await self.radio.activity.record("firmware.tool_failed", diagnostic_output(tail, truncated),
+                                             level="error", details={"returncode": code})
             raise RadioError("Flashing tool failed; keep the backup and follow upstream recovery guidance")
 
     async def _install_job(self, serial: str, plan: dict) -> None:

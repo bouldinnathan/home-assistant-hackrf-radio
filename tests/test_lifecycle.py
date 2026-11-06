@@ -26,7 +26,7 @@ async def test_full_integration_lifecycle(hass, device, spectrum, hass_ws_client
         await hass.async_block_till_done()
         assert entry.state is ConfigEntryState.LOADED
         assert not entry.runtime_data.monitoring
-        assert len([state for state in hass.states.async_all() if state.entity_id.startswith(("sensor.workbench_", "binary_sensor.workbench_", "button.workbench_", "switch.workbench_"))]) == 9
+        assert len([state for state in hass.states.async_all() if state.entity_id.startswith(("sensor.workbench_", "binary_sensor.workbench_", "button.workbench_", "switch.workbench_"))]) == 11
         panel = hass.data["frontend_panels"]["hackrf-radio"]
         assert panel.require_admin
         ws = await hass_ws_client(hass)

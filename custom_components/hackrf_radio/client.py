@@ -13,6 +13,7 @@ from uuid import uuid4
 import aiohttp
 from yarl import URL
 
+from .activity import CURRENT_OPERATION
 from .const import COMMAND_TIMEOUT, DOMAIN, MAX_BINS, MAX_OUTPUT_BYTES, SAFETY_POLICY
 from .radio import AuthenticationError, LocalRadio, RadioBusy, RadioError, validate_serial, validate_settings
 
@@ -75,7 +76,7 @@ class BridgeClient:
         try:
             async with self._session.request(
                 method, self._url + path, json=data,
-                headers={"Authorization": f"Bearer {self._token}"},
+                headers={"Authorization": f"Bearer {self._token}", "X-HackRF-Operation-ID": CURRENT_OPERATION.get() or uuid4().hex},
                 timeout=aiohttp.ClientTimeout(total=timeout), allow_redirects=False,
             ) as response:
                 if response.status in (401, 403):
@@ -187,6 +188,14 @@ class BridgeClient:
         result = await self._request("POST", f"/v1/applications/{action}", {"serial": validate_serial(serial), **values})
         return result["applications"]
 
+    async def activity_read(self, **filters) -> dict:
+        from urllib.parse import urlencode
+
+        try:
+            return (await self._request("GET", "/v1/activity?" + urlencode(filters)))["activity"]
+        except FirmwareUnavailable:
+            return {"records": [], "next_before": 0, "storage_error": "Upgrade the USB bridge to view host activity", "retention": 0}
+
     async def direct_capture(self, serial: str, settings: dict) -> dict:
         from .control import capture_settings
 
@@ -234,7 +243,8 @@ def create_client(hass, data: dict):
         from .software import Applications
 
         lock = hass.data.setdefault(DOMAIN, {}).setdefault("usb_lock", asyncio.Lock())
-        applications = hass.data[DOMAIN].setdefault("applications", Applications(lock, Path(hass.config.path(".storage", DOMAIN, "applications"))))
+        programs = Path(hass.config.path("hackrf_radio_programs.json"))
+        applications = hass.data[DOMAIN].setdefault("applications", Applications(lock, Path(hass.config.path(".storage", DOMAIN, "applications")), profiles_path=programs))
         return LocalRadio(lock, Path(hass.config.path(".storage", DOMAIN, "firmware")), applications=applications)
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
 

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "user_iq_analysis",
+    "name": "My I/Q analysis",
+    "description": "Analyze a previously downloaded receive capture and publish a summary to HA.",
+    "argv": ["/home/radio/venv/bin/python", "/home/radio/iq_analysis.py", "/home/radio/capture.cs8"],
+    "access": "offline",
+    "publish_results": true
+  }
+]

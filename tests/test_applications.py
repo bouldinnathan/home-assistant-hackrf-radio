@@ -176,7 +176,7 @@ async def test_package_job_owns_host_and_survives_request_completion(radio, monk
     monkeypatch.setattr(software.os, "geteuid", lambda: 0)
     started, release = asyncio.Event(), asyncio.Event()
 
-    async def install(commands):
+    async def install(commands, activity=None):
         started.set()
         await release.wait()
 
@@ -198,7 +198,7 @@ async def test_package_service_start_policy_and_soapy_masks(tmp_path, monkeypatc
     monkeypatch.setattr(software, "SERVICE_POLICY", policy)
     monkeypatch.setattr(software, "UNIT_DIRECTORY", units)
 
-    async def packages(commands, environment):
+    async def packages(commands, environment, activity=None):
         assert "exit 101" in policy.read_text()
         assert environment["DEBIAN_FRONTEND"] == "noninteractive"
         assert (units / "soapyremote-server.service").readlink() == Path("/dev/null")

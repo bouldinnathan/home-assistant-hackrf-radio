@@ -1,6 +1,6 @@
 [project]
 name = "homeassistant-hackrf-radio"
-version = "0.3.0"
+version = "0.4.0"
 description = "Receive-only HackRF spectrum monitoring for Home Assistant"
 requires-python = ">=3.13"
 license = "MIT"

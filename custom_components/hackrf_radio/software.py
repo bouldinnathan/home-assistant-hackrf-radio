@@ -20,7 +20,9 @@ from uuid import uuid4
 
 from yarl import URL
 
+from .activity import SECRET_NAME, ActivityLog, diagnostic_output
 from .firmware import BLOCKING_PHASES, _durable_json
+from .programs import load_profiles, result_data
 from .radio import RadioBusy, RadioError, parse_info, validate_serial
 
 APT_EXECUTABLE = "/usr/bin/apt-get"
@@ -155,7 +157,7 @@ def install_available(allowed: bool) -> bool:
             and not os.statvfs("/").f_flag & os.ST_RDONLY)
 
 
-async def run_installer(commands: list[list[str]]) -> None:
+async def run_installer(commands: list[list[str]], activity: ActivityLog | None = None) -> None:
     """Package writes finish independently of the requesting browser."""
     environment = os.environ.copy()
     environment["DEBIAN_FRONTEND"] = "noninteractive"
@@ -183,7 +185,7 @@ async def run_installer(commands: list[list[str]]) -> None:
                     raise RadioError("SoapySDRServer has an existing service configuration; stop and manage it manually")
                 else:
                     mask.symlink_to("/dev/null")
-        await _run_packages(commands, environment)
+        await _run_packages(commands, environment, activity)
         if any("soapyremote-server" in command for command in commands):
             for unit in ("soapyremote-server.service", "SoapySDRServer.service"):
                 mask = UNIT_DIRECTORY / unit
@@ -194,13 +196,21 @@ async def run_installer(commands: list[list[str]]) -> None:
             policy.unlink()
 
 
-async def _run_packages(commands: list[list[str]], environment: dict) -> None:
+async def _run_packages(commands: list[list[str]], environment: dict, activity: ActivityLog | None = None) -> None:
     for command in commands:
+        if activity:
+            await activity.record("packages.step_started", "Running reviewed package-manager step", details={"step": command[1]})
         process = await asyncio.create_subprocess_exec(*command, env=environment,
                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        async def drain(child=process):
-            while await child.stdout.read(65536):
-                pass
+        tail = bytearray()
+        truncated = False
+        async def drain(child=process, output=tail):
+            nonlocal truncated
+            while chunk := await child.stdout.read(65536):
+                output.extend(chunk)
+                if len(output) > 1000:
+                    truncated = True
+                    del output[:-1000]
             return await child.wait()
         task = asyncio.create_task(drain())
         while True:
@@ -211,12 +221,15 @@ async def _run_packages(commands: list[list[str]], environment: dict) -> None:
                 if task.cancelled():
                     task = asyncio.create_task(drain())
         if code:
+            if activity:
+                await activity.record("packages.tool_failed", diagnostic_output(tail, truncated), level="error",
+                                      details={"step": command[1], "returncode": code})
             raise RadioError("Package installation failed; inspect APT/dpkg on the USB host before retrying")
 
 
 class Applications:
     def __init__(self, lock: asyncio.Lock, directory: Path, *, allow_install: bool = False, allow_launch: bool = False,
-                 soapy_bind: str = "127.0.0.1") -> None:
+                 soapy_bind: str = "127.0.0.1", profiles_path: Path | None = None, activity: ActivityLog | None = None) -> None:
         self.lock = lock
         self.directory = Path(directory)
         self.allow_install = allow_install
@@ -226,6 +239,27 @@ class Applications:
         self._plan = None
         self._install_job = None
         self._install_state = None
+        self.profiles_path = profiles_path
+        self.activity = activity or ActivityLog(self.directory.parent / "activity.sqlite")
+        self._profiles = {}
+        self._watcher = None
+        self._launch_lock = asyncio.Lock()
+        self._running_app = None
+        self._last_exit = None
+        self._result = None
+        self._stop_job = None
+
+    async def _catalog(self):
+        self._profiles = await asyncio.to_thread(load_profiles, self.profiles_path)
+        return CATALOG | {identifier: Software(identifier, profile["name"], "Your programs", profile["description"],
+                                               "", "", ("USB host",), (), (profile["argv"][0],), ("host-configured",), profile["desktop"])
+                          for identifier, profile in self._profiles.items()}
+
+    async def _software_for(self, app_id):
+        catalog = await self._catalog()
+        if not isinstance(app_id, str) or app_id not in catalog:
+            raise RadioError("Choose a reviewed app or a program configured on the USB host")
+        return catalog[app_id]
 
     async def _read(self, name: str, default: dict) -> dict:
         def read():
@@ -258,15 +292,30 @@ class Applications:
             install = install | {"phase": "recovery_required", "message": "Previous package job was interrupted; inspect APT/dpkg manually"}
         if install.get("phase") not in {"idle", "complete", "installing", "recovery_required"}:
             install = {"phase": "recovery_required", "message": "Package status is invalid; inspect persistent application storage"}
-        links = await self._read("links.json", {})
+        try:
+            links = await self._read("links.json", {})
+        except RadioError:
+            links = {}
+            await self.activity.record("app.links_unreadable", "Saved app links are unreadable; inspect application storage", level="warning", deduplicate=True)
+        try:
+            result = self._result or await self._read("result.json", {})
+        except RadioError:
+            result = {}
+            await self.activity.record("app.result_unreadable", "Saved custom measurements are unreadable; inspect application storage", level="warning", deduplicate=True)
+        software = await self._catalog()
         def catalog():
             return [asdict(app) | {"installed": bool(app.executables) and all(shutil.which(name) for name in app.executables),
-                                   "web_url": links.get(app.id, "")} for app in CATALOG.values()]
+                                   "web_url": links.get(app.id, ""), "custom": app.id in self._profiles,
+                                   "access": self._profiles.get(app.id, {}).get("access", "usb"),
+                                   "launch_enabled": self.allow_launch or app.id in self._profiles}
+                    for app in software.values()]
         return {"owner": owner, "installer": install, "catalog": await asyncio.to_thread(catalog),
                 "install_enabled": install_available(self.allow_install),
-                "launch_enabled": self.allow_launch,
+                "launch_enabled": self.allow_launch or bool(self._profiles),
                 "soapy_bind": self.soapy_bind,
                 "running": self._process is not None and self._process.returncode is None,
+                "running_app": self._running_app, "last_exit": self._last_exit,
+                "result": result,
                 "plan": self._plan.copy() if self._plan else None}
 
     async def _healthy_device(self, radio, serial: str):
@@ -281,7 +330,11 @@ class Applications:
         return device
 
     async def acquire(self, radio, serial: str, app_id: str, confirmed: bool) -> dict:
-        serial, app = validate_serial(serial), software_for(app_id)
+        async with self._launch_lock:
+            return await self._acquire(radio, serial, app_id, confirmed)
+
+    async def _acquire(self, radio, serial: str, app_id: str, confirmed: bool) -> dict:
+        serial, app = validate_serial(serial), await self._software_for(app_id)
         if confirmed is not True:
             raise RadioError("Confirm that the external app controls its own RF settings and that other SDR apps are closed")
         if self.lock.locked() or radio._closed:
@@ -293,9 +346,14 @@ class Applications:
             await self._healthy_device(radio, serial)
             await self._save("owner.json", {"phase": "external", "serial": serial, "app_id": app.id,
                                              "name": app.name, "lease_id": uuid4().hex, "since": time.time()})
+        await self.activity.record("app.handoff", "USB control handed to external software", details={"app": app.id})
         return await self.status()
 
     async def release(self, radio, serial: str, confirmed_closed: bool) -> dict:
+        async with self._launch_lock:
+            return await self._release(radio, serial, confirmed_closed)
+
+    async def _release(self, radio, serial: str, confirmed_closed: bool) -> dict:
         serial = validate_serial(serial)
         if confirmed_closed is not True:
             raise RadioError("Close the external app, then confirm it has released USB before returning control")
@@ -311,33 +369,157 @@ class Applications:
                 raise RadioError("Only the radio which owns this handoff can return control")
             await self._healthy_device(radio, serial)
             await self._save("owner.json", {"phase": "home_assistant"})
+        await self.activity.record("app.release", "USB control returned after device identity and health check")
         return await self.status()
 
     async def launch(self, radio, serial: str, app_id: str, confirmed: bool) -> dict:
-        app = software_for(app_id)
-        if not self.allow_launch or not app.launch:
+        async with self._launch_lock:
+            return await self._launch(radio, serial, app_id, confirmed)
+
+    async def _launch(self, radio, serial: str, app_id: str, confirmed: bool) -> dict:
+        serial = validate_serial(serial)
+        app = await self._software_for(app_id)
+        profile = self._profiles.get(app_id)
+        if not (self.allow_launch or profile) or not app.launch:
             raise RadioError("App launching is disabled on this USB host or this app uses its upstream launcher")
-        executable = shutil.which(app.launch[0])
+        if self._process is not None and self._process.returncode is None:
+            raise RadioBusy("Stop the current managed program before starting another")
+        if self._watcher:
+            await self._watcher
+        if profile and os.geteuid() == 0:
+            raise RadioError("User programs must run under an unprivileged USB-host account")
+        executable = shutil.which(profile["argv"][0] if profile else app.launch[0])
         if not executable:
             raise RadioError("Install the application on the USB host before launching it")
         if app.desktop and (os.geteuid() == 0 or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))):
             raise RadioError("Desktop apps need an unprivileged USB-host desktop session; HA OS/headless containers do not provide one")
-        await self.acquire(radio, serial, app_id, confirmed)
+        if confirmed is not True:
+            raise RadioError("Confirm the configured program and its RF settings before launch")
+        if not profile or profile["access"] == "usb":
+            await self._acquire(radio, serial, app_id, confirmed)
+        else:
+            # Offline/API programs may coexist with HA receive work, but never
+            # start during firmware or package maintenance.
+            await self.gate()
+            if radio._closed or self.lock.locked() or (radio._firmware and await asyncio.to_thread(self._firmware_blocked, radio._firmware.directory)):
+                raise RadioBusy("Finish USB/firmware maintenance before starting this program")
         # Preserve normal desktop configuration, but never hand the bridge token
         # or Supervisor credentials to a third-party program.
+        allowed_environment = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "DISPLAY", "WAYLAND_DISPLAY",
+                               "DBUS_SESSION_BUS_ADDRESS", "PULSE_SERVER", "QT_QPA_PLATFORM", "LD_LIBRARY_PATH", "VIRTUAL_ENV", "CONDA_PREFIX"}
         environment = {key: value for key, value in os.environ.items()
-                       if not any(word in key.upper() for word in ("TOKEN", "PASSWORD", "SECRET", "API_KEY"))}
+                       if (key in allowed_environment or key.startswith(("LC_", "XDG_"))) and not SECRET_NAME.search(key)}
+        environment["HACKRF_SERIAL"] = serial
+        environment["PYTHONUNBUFFERED"] = "1"
         try:
-            args = (f"--bind={self.soapy_bind}:55132",) if app.id == "soapy_remote" else app.launch[1:]
+            args = ([arg.replace("{serial}", serial) for arg in profile["argv"][1:]] if profile else
+                    (f"--bind={self.soapy_bind}:55132",) if app.id == "soapy_remote" else app.launch[1:])
             self._process = await asyncio.create_subprocess_exec(executable, *args, env=environment,
-                                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                                                                 cwd=profile["cwd"] if profile else None,
+                                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                                  start_new_session=True)
         except OSError as err:
             # Retain ownership until explicit release, even on uncertain startup.
             raise RadioError("Application failed to launch; check the USB-host session, then return control explicitly") from err
+        self._running_app, self._last_exit = app.id, None
+        self._watcher = asyncio.create_task(self._watch(self._process, app.id, bool(profile and profile["publish_results"]), serial))
+        await self.activity.record("app.started", "Managed program started on the USB host", details={"app": app.id})
         return await self.status()
 
+    async def _watch(self, process, app_id, publish_results, serial):
+        async def drain(stream, channel):
+            pending = bytearray()
+            count, window, dropped = 0, time.monotonic(), 0
+            while chunk := await stream.read(4096):
+                pending.extend(chunk)
+                while b"\n" in pending or len(pending) >= 4096:
+                    end = pending.find(b"\n")
+                    if end < 0 or end > 4096:
+                        end = 4096
+                    raw = bytes(pending[:end])
+                    del pending[:end + (1 if pending[end:end + 1] == b"\n" else 0)]
+                    # Never log fragments of an overlong line, which could split
+                    # a secret across the redaction boundary.
+                    if end == 4096:
+                        raw = b"[overlong program output omitted]"
+                        while b"\n" not in pending:
+                            more = await stream.read(4096)
+                            if not more:
+                                pending.clear()
+                                break
+                            pending = bytearray(more)
+                        if b"\n" in pending:
+                            del pending[:pending.index(b"\n") + 1]
+                    if time.monotonic() - window >= 10:
+                        if dropped:
+                            await self.activity.record("app.output_limited", "Program output was rate limited", level="warning",
+                                                       details={"app": app_id, "omitted_lines": dropped})
+                        count, dropped, window = 0, 0, time.monotonic()
+                    if count >= 20:
+                        dropped += 1
+                        continue
+                    count += 1
+                    text = raw.decode("utf-8", errors="replace")
+                    if publish_results and channel == "stdout" and text.lstrip().startswith("{") and "hackrf_radio_result" in text:
+                        try:
+                            data = json.loads(text)
+                            if not isinstance(data, dict) or set(data) != {"hackrf_radio_result"}:
+                                raise ValueError
+                            await self.publish_result(serial, app_id, data["hackrf_radio_result"])
+                            continue
+                        except (ValueError, TypeError, RadioError, OSError):
+                            await self.activity.record("app.result_rejected", "Program result was invalid or could not be persisted; inspect the program and host storage", level="warning", deduplicate=True)
+                    await self.activity.record("app.output", text, level="debug", details={"app": app_id, "stream": channel})
+            if pending:
+                # A final unterminated line is diagnostic output, never a result.
+                await self.activity.record("app.output", pending.decode("utf-8", errors="replace"), level="debug", details={"app": app_id, "stream": channel})
+            if dropped:
+                await self.activity.record("app.output_limited", "Program output was rate limited", level="warning", details={"app": app_id, "omitted_lines": dropped})
+        readers = []
+        try:
+            readers = [asyncio.create_task(drain(process.stdout, "stdout")), asyncio.create_task(drain(process.stderr, "stderr"))]
+            # A daemonized grandchild can hold stdout open after its parent
+            # exits. Never let that prevent status, stop or the next launch.
+            while process.returncode is None:
+                await asyncio.sleep(0.05)
+            code = process.returncode
+            try:
+                await asyncio.wait_for(asyncio.gather(*readers), timeout=3)
+            except TimeoutError:
+                await self.activity.record("app.open_pipes", "Program exited with inherited output pipes still open; inspect descendant processes before returning USB", level="warning")
+                # asyncio streams expose no public close method. The leader has
+                # already exited; close only its remaining pipe transports.
+                transport = getattr(process, "_transport", None)
+                if transport:
+                    transport.close()
+            self._last_exit = {"app_id": app_id, "returncode": code, "at": time.time()}
+            await self.activity.record("app.exited", "Managed program exited; USB handoff requires explicit return",
+                                       level="info" if code == 0 else "warning", details={"app": app_id, "returncode": code})
+        except Exception:
+            await self.activity.record("app.output_error", "Program output monitor failed; stop the managed program and inspect the host", level="error")
+        finally:
+            for reader in readers:
+                reader.cancel()
+            await asyncio.gather(*readers, return_exceptions=True)
+
+    async def publish_result(self, serial, app_id, data):
+        from datetime import UTC, datetime
+
+        result = {"id": uuid4().hex, "serial": validate_serial(serial), "source": app_id,
+                  "timestamp": datetime.now(UTC).isoformat(), "data": result_data(data, self.activity.secrets)}
+        await self._save("result.json", result)
+        self._result = result
+        await self.activity.record("app.result", "Program published measurements", details={"app": app_id})
+
     async def stop(self) -> dict:
+        if self._stop_job is None or self._stop_job.done():
+            async def stop_owned():
+                async with self._launch_lock:
+                    return await self._stop()
+            self._stop_job = asyncio.create_task(stop_owned())
+        return await asyncio.shield(self._stop_job)
+
+    async def _stop(self) -> dict:
         if self._process is not None and self._process.returncode is None:
             try:
                 os.killpg(self._process.pid, signal.SIGTERM)
@@ -350,11 +532,18 @@ class Applications:
                 await self._process.wait()
             except ProcessLookupError:
                 await self._process.wait()
+        if self._watcher:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._watcher), timeout=3)
+            except TimeoutError:
+                self._watcher.cancel()
+                await asyncio.gather(self._watcher, return_exceptions=True)
+            self._watcher = None
         # Do not automatically return USB or resume monitoring after exit.
         return await self.status()
 
     async def save_link(self, app_id: str, value: str) -> dict:
-        software_for(app_id)
+        await self._software_for(app_id)
         url = link_url(value)
         links = await self._read("links.json", {})
         if url:
@@ -405,10 +594,16 @@ class Applications:
 
     async def _install(self, commands) -> None:
         try:
-            await run_installer(commands)
+            await self.activity.record("packages.started", "Installing reviewed packages; USB maintenance lock held")
+            await run_installer(commands, self.activity)
             self._install_state = {"phase": "complete", "message": "Package installation finished; applications were not started"}
-        except (OSError, RadioError):
+            await self.activity.record("packages.completed", "Reviewed software installation finished")
+        except Exception:
             self._install_state = {"phase": "recovery_required", "message": "Inspect APT/dpkg on the USB host before resuming radio use"}
+            await self.activity.record("packages.failed", "Package installation failed; manual package-manager inspection required", level="error")
+        except asyncio.CancelledError:
+            self._install_state = {"phase": "recovery_required", "message": "Inspect APT/dpkg on the USB host before resuming radio use"}
+            await self.activity.record("packages.interrupted", "Package job interrupted outside an active package write; inspect the host", level="error")
         finally:
             try:
                 await self._save("install.json", self._install_state)
@@ -422,7 +617,13 @@ class Applications:
                 await asyncio.shield(self._install_job)
             except asyncio.CancelledError:
                 continue
-        await self.stop()
+        try:
+            await self.stop()
+        except RadioError:
+            # Stop already reaped the owned process before building status.
+            # A malformed edited profile or unreadable catalog must not make
+            # normal host shutdown fail after that cleanup.
+            await self.activity.record("app.shutdown_status", "Managed process cleanup finished; application status needs USB-host inspection", level="warning")
 
 
 def main() -> None:

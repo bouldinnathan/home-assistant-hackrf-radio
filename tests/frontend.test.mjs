@@ -40,6 +40,81 @@ async function mount(t, overrides = {}) {
   return { window, panel, root: panel.shadowRoot, calls };
 }
 
+test("HA workspace exposes custom programs, connection instructions and saved profiles", async (t) => {
+  const data = { ...structuredClone(sample), user_presets: { Garden: settings }, result: { source: "user_decoder", timestamp: "2026-11-05T12:00:00Z", data: { temperature_c: 21.5 } } };
+  const { root, calls } = await mount(t, { data });
+  root.querySelector("#show-setup").click();
+  assert.equal(root.querySelector("#setup-view").hidden, false);
+  assert.equal(root.querySelector("#apps-view").hidden, true);
+  assert.match(root.querySelector("#profile-example").textContent, /user_decoder/);
+  assert.match(root.querySelector("#automation-example").textContent, /hackrf_radio.application/);
+  assert.match(root.querySelector("#connection-checks").textContent, /Serial:/);
+  root.querySelector("#saved-preset-name").value = "My band";
+  root.querySelector("#preset-save").click();
+  await flush();
+  const save = calls.find((call) => call.type === "hackrf_radio/preset");
+  assert.equal(save.action, "save");
+  assert.equal(save.name, "My band");
+  assert.match(root.querySelector("#program-result").textContent, /temperature_c/);
+});
+
+test("activity records are escaped, filterable and independent of receiver controls", async (t) => {
+  const attack = '<img src=x onerror="alert(1)">';
+  const { root, calls } = await mount(t, { callWS: async (message) => {
+    if (message.type.endsWith("/list")) return [{ entry_id: "radio1", name: "Workbench", loaded: true }];
+    if (message.type.endsWith("/activity")) return { records: [{ sequence: 20, timestamp: "2026-11-05T12:00:00Z", level: "error", event: "app.exited", message: attack, details: { error: attack }, operation_id: "a".repeat(32) }], next_before: 20, retention: 2000 };
+    return structuredClone(sample);
+  } });
+  root.querySelector("#show-logs").click();
+  await flush();
+  assert.equal(root.querySelector("#logs-view").hidden, false);
+  assert.equal(root.querySelectorAll(".log-entry").length, 1);
+  assert.equal(root.querySelector("img"), null);
+  assert.match(root.querySelector("#activity-records").textContent, /<img/);
+  root.querySelector("#log-level").value = "error";
+  root.querySelector("#log-search").value = "decoder";
+  root.querySelector("#log-refresh").click();
+  await flush();
+  assert.equal(calls.at(-1).level, "error");
+  assert.equal(calls.at(-1).search, "decoder");
+  root.querySelector("#log-older").click();
+  await flush();
+  assert.equal(calls.at(-1).before, 20);
+  assert.equal(root.querySelector("#log-auto").checked, false);
+  assert.equal(root.querySelectorAll(".log-entry").length, 2);
+});
+
+test("late log response cannot replace a newer filter response", async (t) => {
+  let resolveOld;
+  const { root, panel } = await mount(t, { callWS: async (message) => {
+    if (message.type.endsWith("/list")) return [{ entry_id: "radio1", name: "Workbench", loaded: true }];
+    if (message.type.endsWith("/activity")) {
+      if (message.level === "all") return new Promise((resolve) => { resolveOld = resolve; });
+      return { records: [], next_before: 0, retention: 2000, storage_error: "new filter" };
+    }
+    return structuredClone(sample);
+  } });
+  const old = panel._loadActivity();
+  root.querySelector("#log-level").value = "error";
+  await panel._loadActivity();
+  resolveOld({ records: [], next_before: 0, storage_error: "stale filter" });
+  await old;
+  assert.equal(root.querySelector("#log-status").textContent, "new filter");
+});
+
+test("configured custom program uses only its ID when launched", async (t) => {
+  const data = { ...structuredClone(sample), applications: { available: true, owner: { phase: "home_assistant" }, installer: { phase: "idle" }, launch_enabled: true, catalog: [{ id: "user_decoder", name: "My decoder", category: "Your programs", description: "Local program", systems: ["USB host"], launch: ["host-configured"], launch_enabled: true, installed: true, custom: true }] } };
+  const { root, calls, window } = await mount(t, { data });
+  root.querySelector("#external-confirm").checked = true;
+  root.querySelector("#external-confirm").dispatchEvent(new window.Event("change"));
+  assert.equal(root.querySelector("#app-launch").disabled, false);
+  root.querySelector("#app-launch").click();
+  await flush();
+  const call = calls.find((item) => item.action === "launch");
+  assert.deepEqual(JSON.parse(JSON.stringify(call.values)), { app_id: "user_decoder", confirmed: true });
+  assert.equal(JSON.stringify(call).includes("argv"), false);
+});
+
 test("panel loads receive controls, settings, and escaped device data", async (t) => {
   const attack = '<img src=x onerror="alert(1)">';
   const data = structuredClone(sample);

@@ -1,5 +1,7 @@
 """Admin-only panel commands; return no connection URLs or access tokens."""
 
+from pathlib import Path
+
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
@@ -16,9 +18,23 @@ def coordinator_for(hass, entry_id):
     return entry.runtime_data
 
 
+async def async_read_activity(hass, entry_id, source="home_assistant", **filters):
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN:
+        raise RadioError("Unknown radio")
+    if source == "home_assistant":
+        # Setup/reconnect failures must remain diagnosable after entry unload.
+        from .activity import ActivityLog
+
+        readers = hass.data.setdefault(DOMAIN, {}).setdefault("activity_readers", {})
+        journal = readers.setdefault(entry.entry_id, ActivityLog(Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "activity.sqlite")), "home_assistant"))
+        return await journal.read(**filters)
+    return await coordinator_for(hass, entry_id).async_activity(source=source, **filters)
+
+
 @callback
 def async_register_commands(hass):
-    for handler in (list_radios, get_radio, control_radio, firmware_radio, applications_radio, capture_radio):
+    for handler in (list_radios, get_radio, control_radio, firmware_radio, applications_radio, capture_radio, activity_radio, preset_radio):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -117,3 +133,36 @@ async def capture_radio(hass, connection, msg):
         connection.send_result(msg["id"], result)
     except (RadioError, ValueError) as err:
         connection.send_error(msg["id"], "capture_error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hackrf_radio/activity", vol.Required("entry_id"): str,
+    vol.Optional("source", default="home_assistant"): vol.In(["home_assistant", "usb_host"]),
+    vol.Optional("level", default="all"): vol.In(["all", "debug", "info", "warning", "error"]),
+    vol.Optional("search", default=""): vol.All(str, vol.Length(max=120)),
+    vol.Optional("limit", default=200): vol.All(int, vol.Range(min=1, max=500)),
+    vol.Optional("before", default=0): vol.All(int, vol.Range(min=0)),
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def activity_radio(hass, connection, msg):
+    try:
+        filters = {key: value for key, value in msg.items() if key not in {"id", "type", "entry_id"}}
+        connection.send_result(msg["id"], await async_read_activity(hass, msg["entry_id"], **filters))
+    except (RadioError, ValueError) as err:
+        connection.send_error(msg["id"], "activity_error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hackrf_radio/preset", vol.Required("entry_id"): str,
+    vol.Required("action"): vol.In(["save", "apply", "delete"]), vol.Required("name"): str,
+    vol.Optional("settings"): dict,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def preset_radio(hass, connection, msg):
+    try:
+        values = {key: value for key, value in msg.items() if key not in {"id", "type", "entry_id"}}
+        connection.send_result(msg["id"], await coordinator_for(hass, msg["entry_id"]).async_preset(**values))
+    except (RadioError, ValueError) as err:
+        connection.send_error(msg["id"], "preset_error", str(err))

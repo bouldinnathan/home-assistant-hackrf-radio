@@ -12,23 +12,25 @@ import os
 import re
 from collections import deque
 from pathlib import Path
+from uuid import uuid4
 
 from aiohttp import web
 
+from .activity import CURRENT_OPERATION
 from .const import SAFETY_POLICY, VERSION
 from .radio import LocalRadio, RadioBusy, RadioError
 
 
 def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: Path | None = None,
                application_directory: Path | None = None, allow_install: bool = False, allow_launch: bool = False,
-               receive_token: str = "", soapy_bind: str = "127.0.0.1") -> web.Application:
+               receive_token: str = "", soapy_bind: str = "127.0.0.1", profiles_path: Path | None = None) -> web.Application:
     if len(token) < 32 or not token.isascii() or any(character.isspace() for character in token):
         raise ValueError("HACKRF_BRIDGE_TOKEN must contain at least 32 non-whitespace ASCII characters")
     if receive_token and (len(receive_token) < 32 or not receive_token.isascii()
                           or any(character.isspace() for character in receive_token) or receive_token == token):
         raise ValueError("HACKRF_RECEIVE_TOKEN must be a different random token of at least 32 non-whitespace ASCII characters")
     radio = radio or LocalRadio(firmware_directory=firmware_directory, application_directory=application_directory,
-                               allow_install=allow_install, allow_launch=allow_launch, soapy_bind=soapy_bind)
+                               allow_install=allow_install, allow_launch=allow_launch, soapy_bind=soapy_bind, profiles_path=profiles_path)
     active: dict[str, asyncio.Task] = {}
     cancelled: deque[str] = deque(maxlen=256)
 
@@ -38,17 +40,39 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
         admin = hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode())
         receive = bool(receive_token) and hmac.compare_digest(supplied.encode(), f"Bearer {receive_token}".encode())
         if not admin and not receive:
+            await radio.activity.record("bridge.authentication", "Bridge request rejected: invalid credentials", level="warning", deduplicate=True)
             return web.json_response({"error": "Unauthorized"}, status=401)
         if not admin and not (request.path in {"/v1/devices", "/v1/sweep", "/v1/capture", "/v1/stop"} or request.path.startswith("/v1/captures/")):
             return web.json_response({"error": "Receive token cannot perform administrative actions"}, status=403)
+        supplied_operation = request.headers.get("X-HackRF-Operation-ID", "")
+        operation = supplied_operation if re.fullmatch(r"[0-9a-f]{32}", supplied_operation) else uuid4().hex
+        context = CURRENT_OPERATION.set(operation)
+        path = request.match_info.route.resource.canonical if request.match_info.route.resource else "unknown"
+        quiet = path in {"/v1/activity", "/v1/devices"} or path.endswith("/{action}") and request.match_info.get("action") == "status"
         try:
-            return await handler(request)
+            response = await handler(request)
+            if not quiet:
+                await radio.activity.record("bridge.completed", "Bridge operation completed", operation_id=operation,
+                                            details={"route": path, "action": request.match_info.get("action", ""), "status": response.status})
+            response.headers["X-HackRF-Operation-ID"] = operation
+            return response
         except RadioBusy:
+            await radio.activity.record("bridge.busy", "Operation blocked by exclusive ownership or maintenance", level="debug", operation_id=operation, deduplicate=True)
             return web.json_response({"error": "Radio busy or sweep cancelled"}, status=409)
         except RadioError as err:
+            await radio.activity.record("bridge.failed", str(err), level="error", operation_id=operation, details={"route": path}, deduplicate=True)
             return web.json_response({"error": str(err)}, status=503)
         except (ValueError, TypeError, KeyError):
+            await radio.activity.record("bridge.invalid_request", "Invalid bridge request rejected", level="warning", operation_id=operation, deduplicate=True)
             return web.json_response({"error": "Invalid request"}, status=400)
+        except web.HTTPException:
+            raise
+        except Exception as err:
+            await radio.activity.record("bridge.internal_error", "Unexpected bridge failure; inspect host configuration", level="error",
+                                        operation_id=operation, details={"exception": type(err).__name__}, deduplicate=True)
+            return web.json_response({"error": "Internal bridge failure; inspect the activity log", "operation_id": operation}, status=500)
+        finally:
+            CURRENT_OPERATION.reset(context)
 
     app = web.Application(middlewares=[authenticate], client_max_size=8192)
 
@@ -152,6 +176,12 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
             "X-HackRF-Format": "ci8", "X-HackRF-SHA256": metadata["sha256"],
         })
 
+    async def activity(request):
+        if set(request.query) - {"level", "search", "limit", "before"}:
+            raise ValueError
+        return result({"activity": await radio.activity_read(level=request.query.get("level", "all"), search=request.query.get("search", ""),
+                                                             limit=int(request.query.get("limit", "200")), before=int(request.query.get("before", "0")))})
+
     app.router.add_get("/v1/devices", devices)
     app.router.add_post("/v1/sweep", sweep)
     app.router.add_post("/v1/stop", stop)
@@ -159,6 +189,7 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
     app.router.add_post("/v1/applications/{action}", applications)
     app.router.add_post("/v1/capture", capture)
     app.router.add_get("/v1/captures/{serial}/{capture_id}", capture_file)
+    app.router.add_get("/v1/activity", activity)
     app.on_cleanup.append(cleanup)
     return app
 
@@ -172,12 +203,13 @@ def main() -> None:
     parser.add_argument("--allow-software-install", action="store_true", help="Opt in to reviewed APT installation on a root Debian/Ubuntu USB host")
     parser.add_argument("--allow-app-launch", action="store_true", help="Opt in to fixed software launch profiles on this USB host")
     parser.add_argument("--soapy-bind", default="127.0.0.1", help="SoapyRemote bind IP: loopback by default; a trusted private VPN/LAN IP requires firewall protection")
+    parser.add_argument("--custom-programs", type=Path, help="USB-host JSON launch profiles; user programs require an unprivileged account")
     args = parser.parse_args()
     token = os.environ.get("HACKRF_BRIDGE_TOKEN", "")
     try:
         app = create_app(token, firmware_directory=args.firmware_dir, application_directory=args.applications_dir,
                          allow_install=args.allow_software_install, allow_launch=args.allow_app_launch,
-                         receive_token=os.environ.get("HACKRF_RECEIVE_TOKEN", ""), soapy_bind=args.soapy_bind)
+                         receive_token=os.environ.get("HACKRF_RECEIVE_TOKEN", ""), soapy_bind=args.soapy_bind, profiles_path=args.custom_programs)
     except (ValueError, RadioError) as err:
         parser.error(str(err))
     web.run_app(app, host=args.host, port=args.port, access_log=None, handler_cancellation=True)

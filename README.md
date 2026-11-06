@@ -2,7 +2,7 @@
 
 A HACS custom integration for **receive-only spectrum monitoring** with a HackRF One or compatible HackRF Pro. It follows the config-entry, custom sidebar panel, WebSocket and entity patterns in [your MeshNet integration](https://github.com/bouldinnathan/home-assistant-mesh-radio).
 
-The **HackRF Radio** sidebar includes spectrum/waterfall views, band/gain controls, periodic monitoring, reviewed firmware maintenance, an **Apps & direct control** workspace and a software library. External apps can use a scoped receive API, explicitly take USB ownership, or use an optional managed SoapyRemote server. Native HA entities provide peak level, peak frequency, median noise floor, bin count, last sweep, connectivity, signal threshold, a monitoring switch and a sweep button.
+The **HackRF Radio** sidebar includes spectrum/waterfall views, band/gain controls, periodic monitoring, reviewed firmware maintenance, an **Apps & your code** workspace, **Connecting & integrations** instructions, **Activity & logs**, and a software library. External apps can use a scoped receive API, explicitly take USB ownership, or use an optional managed SoapyRemote server. Native HA entities provide peak level, peak frequency, median noise floor, bin count, last sweep, connectivity, signal threshold, a monitoring switch, a sweep button, an application-owner sensor and a custom-result sensor.
 
 ## Device protection
 
@@ -36,7 +36,7 @@ Repository: [bouldinnathan/home-assistant-hackrf-radio](https://github.com/bould
 
 ### Manual
 
-Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.3.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
+Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.4.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
 
 ## Connecting the USB device
 
@@ -103,7 +103,7 @@ The panel is admin-only and uses HA's authenticated WebSocket connection. Bridge
 
 ## Other apps and direct control
 
-Open **Apps & direct control** for a library of **17 SDR projects plus a generic external-app handoff**. It includes Gqrx, GNU Radio, CubicSDR, SoapyRemote, inspectrum, SDR++, SDRangel, SatDump, SigDigger, URH, QSpectrumAnalyzer, SDR#, SDR Console, radioconda and more, with upstream project/download links and optional saved web links.
+Open **Apps & your code** for a library of **17 SDR projects plus a generic external-app handoff**. It includes Gqrx, GNU Radio, CubicSDR, SoapyRemote, inspectrum, SDR++, SDRangel, SatDump, SigDigger, URH, QSpectrumAnalyzer, SDR#, SDR Console, radioconda and more, with upstream project/download links and optional saved web links.
 
 - **Direct receive API:** authenticated scripts can request spectrum or signed 8-bit I/Q captures with frequency, sample-rate and IF/VGA settings. Captures are capped at 8 MB and can be downloaded through the bridge or the HA panel. A separate `HACKRF_RECEIVE_TOKEN` cannot flash firmware, install software, launch apps or change ownership.
 - **USB handoff:** pause HA USB operations before a native app opens the device. Ownership survives restarts, blocks firmware/capture activity and must be returned explicitly after the app closes. External apps control their own RF/amp/bias/TX settings; the integration's receive locks cannot constrain them.
@@ -118,13 +118,23 @@ docker compose -f compose.bridge.yaml -f compose.tools.yaml up -d --build
 
 Set `HACKRF_APPS=soapy_remote,gqrx,cubicsdr,gnuradio,inspectrum` in `.env` to build a larger tools image. A headless container still has no desktop display, and no unauthenticated Soapy port is published. See [app setup, installation policies and the direct-control API](docs/APPS_AND_CONTROL.md), including an [external receive client](examples/receive_client.py).
 
+## Your code, integrations and activity logs
+
+Configure trusted programs on the USB host with `--custom-programs /absolute/path/programs.json`, or use `hackrf_radio_programs.json` in HA's configuration directory for local USB. Programs appear in the application selector and can be started/stopped from HA. Fixed commands run as an unprivileged account, with a restricted inherited environment. USB profiles acquire persistent exclusive ownership; offline/API profiles leave HA ownership intact and must avoid direct USB access. Commands cannot be uploaded or edited through a bridge/browser endpoint.
+
+Programs can optionally emit bounded measurements to `sensor.YOUR_RADIO_custom_result` and the `hackrf_radio_result` event. Use HA actions for scheduled sweeps/recordings, app control, saved receive profiles and external result reporting. Existing HA MQTT, Node-RED, webhook and notification integrations can consume those events; no additional integration is required for standalone code.
+
+**Activity & logs** shows persistent, filtered HA and USB-host history with UTC timestamps, correlated operation IDs, program stdout/stderr, exit codes and firmware phases. Each source retains 2,000 records with a bounded SQLite file. Noisy programs are rate limited, credentials and terminal controls are redacted, and filtered history can be exported as JSON. Storage failures are reported without interrupting firmware writes. Review arbitrary application output before sharing an export.
+
+See [connection instructions, program profiles, HA actions, optional integrations and logging details](docs/HOME_ASSISTANT_WORKSPACE.md), including an [example profile](examples/programs.json) and [file-analysis program](examples/iq_analysis.py).
+
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
 | No devices | USB cable/power, permissions, USB passthrough, native tool installation and PortaPack HackRF mode |
 | Busy | Close other SDR applications; only one capture is allowed per bridge/HA USB host |
-| External app owns USB | Close it and explicitly return control in Apps & direct control; the ownership record does not auto-expire |
+| External app owns USB | Close it and explicitly return control in Apps & your code; the ownership record does not auto-expire |
 | App launch/install disabled | Check host opt-in, desktop/root requirements, storage and read-only-container limits in the app guide |
 | Firmware or self-test block | Read the exact identity and upstream compatibility documentation; a failed self-test is not repaired automatically |
 | Firmware recovery required | Retain the persistent backup/journal; inspect the failure and follow upstream recovery instructions |

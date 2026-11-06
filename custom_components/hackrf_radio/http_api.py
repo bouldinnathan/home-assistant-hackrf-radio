@@ -18,6 +18,7 @@ class CaptureView(HomeAssistantView):
         try:
             coordinator = coordinator_for(request.app[KEY_HASS], entry_id)
             metadata, raw = await coordinator.client.capture_data(coordinator.serial, capture_id)
+            await coordinator.activity.record("capture.download", "Receive capture downloaded through Home Assistant", details={"bytes": len(raw)})
         except RadioError as err:
             raise web.HTTPNotFound(text=str(err)) from err
         return web.Response(body=raw, content_type="application/octet-stream", headers={

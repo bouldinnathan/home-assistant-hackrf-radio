@@ -1,0 +1,136 @@
+sweep:
+  name: Sweep once
+  description: Run one bounded receive sweep on the configured radio.
+  fields:
+    entry_id: &entry
+      name: Radio
+      required: true
+      selector:
+        config_entry:
+          integration: hackrf_radio
+capture:
+  name: Capture I/Q
+  description: Stop monitoring and record a bounded receive capture. Returns capture metadata.
+  fields:
+    entry_id: *entry
+    settings: &settings
+      name: Receive settings
+      required: true
+      selector:
+        object:
+monitoring:
+  name: Set monitoring
+  description: Explicitly start or stop periodic receive sweeps. Does not bypass maintenance or ownership blocks.
+  fields:
+    entry_id: *entry
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
+configure:
+  name: Configure receiver
+  description: Validate and save receive settings. Stops monitoring before applying changes.
+  fields:
+    entry_id: *entry
+    settings: *settings
+application:
+  name: Control application
+  description: Launch a configured program, stop a managed program, hand off USB or explicitly return it. No arbitrary commands.
+  fields:
+    entry_id: *entry
+    action:
+      name: Action
+      required: true
+      selector:
+        select:
+          options: [launch, stop, handoff, release]
+    app_id:
+      name: Application or custom profile ID
+      description: Required for launch and handoff. Custom IDs begin with user_.
+      selector:
+        text:
+    confirmed:
+      name: Confirm launch and external RF settings
+      default: false
+      selector:
+        boolean:
+    confirmed_closed:
+      name: Confirm the external program has closed its USB connections
+      default: false
+      selector:
+        boolean:
+preset:
+  name: Manage receive profile
+  description: Save, apply or delete a named receive profile. Applying does not start monitoring.
+  fields:
+    entry_id: *entry
+    action:
+      name: Action
+      required: true
+      selector:
+        select:
+          options: [save, apply, delete]
+    name:
+      name: Profile name
+      required: true
+      selector:
+        text:
+    settings:
+      name: Settings to save
+      description: Omit to save the current receive settings.
+      selector:
+        object:
+report_result:
+  name: Report custom measurements
+  description: Publish 1–16 flat scalar measurements to the Custom result sensor and hackrf_radio_result event.
+  fields:
+    entry_id: *entry
+    source:
+      name: Source ID
+      required: true
+      example: garden_decoder
+      selector:
+        text:
+    data:
+      name: Measurements
+      required: true
+      example: '{"temperature_c": 21.5}'
+      selector:
+        object:
+get_activity:
+  name: Read activity history
+  description: Return a bounded page of redacted persistent activity records. Use response_variable in automations.
+  fields:
+    entry_id: *entry
+    source:
+      name: Source
+      default: home_assistant
+      selector:
+        select:
+          options: [home_assistant, usb_host]
+    level:
+      name: Level
+      default: all
+      selector:
+        select:
+          options: [all, debug, info, warning, error]
+    search:
+      name: Search text
+      selector:
+        text:
+    limit:
+      name: Maximum records
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+    before:
+      name: Before sequence number
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box

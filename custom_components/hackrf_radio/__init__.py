@@ -23,10 +23,12 @@ async def async_setup(hass, config) -> bool:
     from homeassistant.components.http import StaticPathConfig
 
     from .http_api import CaptureView
+    from .services import async_register_services
     from .websocket_api import async_register_commands
 
     hass.data.setdefault(DOMAIN, {})
     async_register_commands(hass)
+    async_register_services(hass)
     hass.http.register_view(CaptureView)
     await hass.http.async_register_static_paths([
         StaticPathConfig("/hackrf_radio_static", str(Path(__file__).parent / "frontend"), cache_headers=False),
@@ -49,6 +51,7 @@ async def async_setup_entry(hass, entry) -> bool:
     entry.runtime_data = coordinator
     forwarding = False
     try:
+        await coordinator.async_initialize()
         await coordinator.async_config_entry_first_refresh()
         forwarding = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

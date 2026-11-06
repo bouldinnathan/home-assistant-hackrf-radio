@@ -1,6 +1,6 @@
 # External apps, direct receive API and software installation
 
-The **Apps & direct control** tab has three distinct paths:
+The **Apps & your code** tab has three distinct paths:
 
 | Path | Use it for | Hardware owner |
 | --- | --- | --- |
@@ -157,3 +157,7 @@ Unknown keys, transmit parameters, arbitrary CLI arguments, RF amp enable, anten
 The admin-only HA endpoint `/api/hackrf_radio/{entry_id}/captures/{capture_id}` downloads the same bytes through HA authentication; the browser does not receive the bridge token. Example external receive client: [examples/receive_client.py](../examples/receive_client.py).
 
 Admin application actions are under `POST /v1/applications/{action}`. Status takes `{}`. Other actions take the serial and exactly the fields shown by the panel: `handoff(app_id, confirmed)`, `release(confirmed_closed)`, `launch(app_id, confirmed)`, `stop()`, `link(app_id, url)`, `prepare_install(apps)` and `install(plan_id, confirmed)`. No action accepts a user-supplied executable or command string.
+
+## Home Assistant programs, automations and logs
+
+Version 0.4 adds USB-host configured custom launch profiles, optional decoder measurements, native HA actions, saved receive profiles and persistent activity history. See [the Home Assistant workspace guide](HOME_ASSISTANT_WORKSPACE.md). Fixed reviewed catalog recipes remain available; custom commands require an operator-controlled host file and an unprivileged execution account.

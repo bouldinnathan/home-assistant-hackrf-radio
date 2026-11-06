@@ -174,13 +174,18 @@ class LocalRadio:
 
     def __init__(self, lock: asyncio.Lock | None = None, firmware_directory: Path | None = None,
                  applications=None, application_directory: Path | None = None,
-                 allow_install: bool = False, allow_launch: bool = False, soapy_bind: str = "127.0.0.1") -> None:
+                 allow_install: bool = False, allow_launch: bool = False, soapy_bind: str = "127.0.0.1",
+                 profiles_path: Path | None = None) -> None:
+        from .activity import ActivityLog
+
         self._lock = lock if lock is not None else asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._closed = False
         self._capabilities_checked = False
         self._firmware = None
         self._applications = applications
+        log_directory = application_directory or (firmware_directory.parent / "applications" if firmware_directory else None)
+        self.activity = applications.activity if applications else ActivityLog((log_directory / "activity.sqlite") if log_directory else None)
         if firmware_directory is not None:
             from .firmware import FirmwareManager
 
@@ -189,7 +194,8 @@ class LocalRadio:
             from .software import Applications
 
             directory = application_directory if application_directory is not None else firmware_directory.parent / "applications"
-            self._applications = Applications(self._lock, directory, allow_install=allow_install, allow_launch=allow_launch, soapy_bind=soapy_bind)
+            self._applications = Applications(self._lock, directory, allow_install=allow_install, allow_launch=allow_launch,
+                                              soapy_bind=soapy_bind, profiles_path=profiles_path, activity=self.activity)
 
     async def _assert_managed_access(self) -> None:
         if self._applications:
@@ -218,11 +224,14 @@ class LocalRadio:
                 await process.wait()
             # -h exits with failure in several upstream releases.
             if process.returncode and args not in (["hackrf_sweep", "-h"], ["hackrf_spiflash", "-h"], ["hackrf_transfer", "-h"]):
+                await self.activity.record("usb.command_failed", stderr.decode("utf-8", errors="replace") or "HackRF command failed",
+                                           level="error", details={"tool": args[0], "returncode": process.returncode}, deduplicate=True)
                 if args[0] == "hackrf_spiflash":
                     raise RadioError("SPI flash read failed; inspect USB access and the firmware maintenance status")
                 raise RadioError("HackRF command failed; check USB access, firmware support, and whether another SDR app owns the device")
             return (stdout + (stderr if args[-1] == "-h" else b"")).decode("utf-8", errors="replace")
         except TimeoutError as err:
+            await self.activity.record("usb.timeout", "HackRF command exceeded its deadline", level="warning", details={"tool": args[0]}, deduplicate=True)
             if args[0] == "hackrf_spiflash":
                 raise RadioError("SPI flash read timed out; inspect firmware maintenance status and retain the backup") from err
             raise RadioError("HackRF operation timed out; scanning stopped without resetting or flashing the device") from err
@@ -331,6 +340,9 @@ class LocalRadio:
         from .control import capture_data
 
         return await capture_data(self, serial, identifier)
+
+    async def activity_read(self, **filters) -> dict:
+        return await self.activity.read(**filters)
 
     async def application_status(self) -> dict:
         if not self._applications:
