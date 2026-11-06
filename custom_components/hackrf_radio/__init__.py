@@ -22,10 +22,12 @@ async def async_setup(hass, config) -> bool:
     from homeassistant.components import panel_custom
     from homeassistant.components.http import StaticPathConfig
 
+    from .http_api import CaptureView
     from .websocket_api import async_register_commands
 
     hass.data.setdefault(DOMAIN, {})
     async_register_commands(hass)
+    hass.http.register_view(CaptureView)
     await hass.http.async_register_static_paths([
         StaticPathConfig("/hackrf_radio_static", str(Path(__file__).parent / "frontend"), cache_headers=False),
     ])

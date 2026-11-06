@@ -1,0 +1,17 @@
+# docker compose -f compose.bridge.yaml -f compose.tools.yaml up -d --build
+# This installs software inside the bridge image, not on the browser computer.
+services:
+  hackrf-bridge:
+    build:
+      target: tools
+      args:
+        HACKRF_APPS: "${HACKRF_APPS:-soapy_remote,inspectrum}"
+    command:
+      - python
+      - -m
+      - custom_components.hackrf_radio.bridge
+      - --host
+      - 0.0.0.0
+      - --firmware-dir
+      - /var/lib/hackrf/firmware
+      - --allow-app-launch

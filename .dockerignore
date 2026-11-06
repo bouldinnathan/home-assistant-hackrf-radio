@@ -5,3 +5,7 @@ tests
 node_modules
 __pycache__
 dist
+firmware-data
+applications-data
+applications
+.storage

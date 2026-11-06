@@ -167,11 +167,75 @@ class BridgeClient:
         result = await self._request("POST", "/v1/firmware/verify", {"serial": validate_serial(serial)})
         return result["firmware"]
 
+    async def application_status(self) -> dict:
+        try:
+            result = await self._request("POST", "/v1/applications/status", {})
+        except FirmwareUnavailable:
+            from dataclasses import asdict
+
+            from .software import CATALOG
+
+            return {"available": False, "owner": {"phase": "home_assistant"}, "catalog": [asdict(app) | {"installed": False} for app in CATALOG.values()],
+                    "installer": {"phase": "idle"}, "running": False, "plan": None,
+                    "install_enabled": False, "launch_enabled": False}
+        return result["applications"]
+
+    async def application_action(self, serial: str, action: str, values: dict) -> dict:
+        from .software import validate_action
+
+        validate_action(action, values)
+        result = await self._request("POST", f"/v1/applications/{action}", {"serial": validate_serial(serial), **values})
+        return result["applications"]
+
+    async def direct_capture(self, serial: str, settings: dict) -> dict:
+        from .control import capture_settings
+
+        settings = capture_settings(settings)
+        if self._operation:
+            raise RadioBusy("A radio operation is already in progress")
+        self._operation, self._task = uuid4().hex, asyncio.current_task()
+        try:
+            result = await self._request("POST", "/v1/capture", {"serial": validate_serial(serial), "settings": settings, "operation_id": self._operation})
+            return result["capture"]
+        except asyncio.CancelledError:
+            with suppress(RadioError):
+                await self._request("POST", "/v1/stop", {"operation_id": self._operation}, timeout=5)
+            raise
+        finally:
+            self._operation, self._task = None, None
+
+    async def capture_data(self, serial: str, identifier: str) -> tuple[dict, bytes]:
+        from .control import MAX_CAPTURE_BYTES, capture_id
+
+        identifier = capture_id(identifier)
+        try:
+            async with self._session.get(self._url + f"/v1/captures/{validate_serial(serial)}/{identifier}",
+                                         headers={"Authorization": f"Bearer {self._token}"},
+                                         timeout=aiohttp.ClientTimeout(total=30), allow_redirects=False) as response:
+                if response.status != 200:
+                    raise RadioError("Receive capture is unavailable from the bridge")
+                data = bytearray()
+                async for chunk in response.content.iter_chunked(65536):
+                    data.extend(chunk)
+                    if len(data) > MAX_CAPTURE_BYTES:
+                        raise RadioError("Receive capture exceeded the maximum size")
+                import hashlib
+
+                digest = hashlib.sha256(data).hexdigest()
+                if len(data) < 2048 or len(data) % 2 or response.headers.get("X-HackRF-SHA256") != digest:
+                    raise RadioError("Receive capture failed size or SHA256 verification")
+                return {"capture_id": identifier, "serial": serial, "sha256": digest}, bytes(data)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise RadioError("Cannot download the receive capture") from err
+
 
 def create_client(hass, data: dict):
     if data["transport"] == "local":
+        from .software import Applications
+
         lock = hass.data.setdefault(DOMAIN, {}).setdefault("usb_lock", asyncio.Lock())
-        return LocalRadio(lock, Path(hass.config.path(".storage", DOMAIN, "firmware")))
+        applications = hass.data[DOMAIN].setdefault("applications", Applications(lock, Path(hass.config.path(".storage", DOMAIN, "applications"))))
+        return LocalRadio(lock, Path(hass.config.path(".storage", DOMAIN, "firmware")), applications=applications)
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
     return BridgeClient(async_get_clientsession(hass), data["url"], data["token"])

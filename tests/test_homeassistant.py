@@ -14,7 +14,13 @@ from custom_components.hackrf_radio.coordinator import HackRFCoordinator
 from custom_components.hackrf_radio.diagnostics import async_get_config_entry_diagnostics
 from custom_components.hackrf_radio.radio import RadioError
 from custom_components.hackrf_radio.sensor import HackRFSensor
-from custom_components.hackrf_radio.websocket_api import control_radio, firmware_radio, list_radios
+from custom_components.hackrf_radio.websocket_api import (
+    applications_radio,
+    capture_radio,
+    control_radio,
+    firmware_radio,
+    list_radios,
+)
 
 from .conftest import SERIAL
 
@@ -35,7 +41,8 @@ def entry(hass):
 @pytest.fixture
 def client(device, spectrum):
     return AsyncMock(devices=AsyncMock(return_value=[device]), sweep=AsyncMock(return_value=spectrum),
-                     firmware_status=AsyncMock(return_value={"phase": "idle", "active": False, "catalog": []}))
+                     firmware_status=AsyncMock(return_value={"phase": "idle", "active": False, "catalog": []}),
+                     application_status=AsyncMock(return_value={"owner": {"phase": "home_assistant"}, "installer": {"phase": "idle"}, "catalog": []}))
 
 
 async def test_real_config_flow_requires_safety_and_prevents_duplicate_serial(hass, device):
@@ -171,6 +178,10 @@ async def test_websocket_requires_admin(hass):
         list_radios(hass, connection, {"id": 1})
     with pytest.raises(Unauthorized):
         firmware_radio(hass, connection, {"id": 2, "action": "install"})
+    with pytest.raises(Unauthorized):
+        applications_radio(hass, connection, {"id": 3, "action": "install"})
+    with pytest.raises(Unauthorized):
+        capture_radio(hass, connection, {"id": 4})
 
 
 async def test_panel_settings_reject_unsafe_flags_before_changes(hass, entry, client):

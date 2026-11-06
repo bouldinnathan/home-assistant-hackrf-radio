@@ -15,7 +15,8 @@ from .conftest import SERIAL
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_full_integration_lifecycle(hass, device, spectrum, hass_ws_client):
     client = AsyncMock(devices=AsyncMock(return_value=[device]), sweep=AsyncMock(return_value=spectrum),
-                       firmware_status=AsyncMock(return_value={"phase": "idle", "active": False, "catalog": []}))
+                       firmware_status=AsyncMock(return_value={"phase": "idle", "active": False, "catalog": []}),
+                       application_status=AsyncMock(return_value={"owner": {"phase": "home_assistant"}, "installer": {"phase": "idle"}, "catalog": []}))
     entry = MockConfigEntry(domain=DOMAIN, title="Workbench", unique_id=SERIAL,
                             data={"transport": "bridge", "serial": SERIAL, "url": "http://private-host:8099", "token": "secret-token"},
                             options=DEFAULT_SETTINGS)

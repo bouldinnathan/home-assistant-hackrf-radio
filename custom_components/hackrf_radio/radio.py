@@ -172,16 +172,28 @@ def parse_sweep(output: str, settings: dict) -> dict:
 class LocalRadio:
     """Serialize access and reap children on errors, timeout, cancellation or stop."""
 
-    def __init__(self, lock: asyncio.Lock | None = None, firmware_directory: Path | None = None) -> None:
+    def __init__(self, lock: asyncio.Lock | None = None, firmware_directory: Path | None = None,
+                 applications=None, application_directory: Path | None = None,
+                 allow_install: bool = False, allow_launch: bool = False, soapy_bind: str = "127.0.0.1") -> None:
         self._lock = lock if lock is not None else asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._closed = False
         self._capabilities_checked = False
         self._firmware = None
+        self._applications = applications
         if firmware_directory is not None:
             from .firmware import FirmwareManager
 
             self._firmware = FirmwareManager(self, firmware_directory)
+        if self._applications is None and (application_directory is not None or firmware_directory is not None):
+            from .software import Applications
+
+            directory = application_directory if application_directory is not None else firmware_directory.parent / "applications"
+            self._applications = Applications(self._lock, directory, allow_install=allow_install, allow_launch=allow_launch, soapy_bind=soapy_bind)
+
+    async def _assert_managed_access(self) -> None:
+        if self._applications:
+            await self._applications.gate()
 
     async def _run(self, args: list[str], timeout: float = COMMAND_TIMEOUT) -> str:
         try:
@@ -205,7 +217,7 @@ class LocalRadio:
                 stdout, stderr = await asyncio.gather(*readers)
                 await process.wait()
             # -h exits with failure in several upstream releases.
-            if process.returncode and args not in (["hackrf_sweep", "-h"], ["hackrf_spiflash", "-h"]):
+            if process.returncode and args not in (["hackrf_sweep", "-h"], ["hackrf_spiflash", "-h"], ["hackrf_transfer", "-h"]):
                 if args[0] == "hackrf_spiflash":
                     raise RadioError("SPI flash read failed; inspect USB access and the firmware maintenance status")
                 raise RadioError("HackRF command failed; check USB access, firmware support, and whether another SDR app owns the device")
@@ -253,6 +265,7 @@ class LocalRadio:
         if self._lock.locked():
             raise RadioBusy("Radio is busy; wait for the current sweep")
         async with self._lock:
+            await self._assert_managed_access()
             self._task = asyncio.current_task()
             try:
                 return [device.as_dict() for device in await self._devices()]
@@ -269,6 +282,7 @@ class LocalRadio:
         if self._lock.locked():
             raise RadioBusy("Radio is busy; overlapping captures are blocked")
         async with self._lock:
+            await self._assert_managed_access()
             self._task = asyncio.current_task()
             try:
                 device = next((item for item in await self._devices() if item.serial == serial), None)
@@ -308,8 +322,50 @@ class LocalRadio:
             raise RadioError("Persistent firmware storage is required")
         return await self._firmware.verify_boot(serial)
 
+    async def direct_capture(self, serial: str, settings: dict) -> dict:
+        from .control import capture
+
+        return await capture(self, serial, settings)
+
+    async def capture_data(self, serial: str, identifier: str) -> tuple[dict, bytes]:
+        from .control import capture_data
+
+        return await capture_data(self, serial, identifier)
+
+    async def application_status(self) -> dict:
+        if not self._applications:
+            from .software import CATALOG
+
+            return {"available": False, "owner": {"phase": "home_assistant"},
+                    "catalog": [asdict(app) | {"installed": False} for app in CATALOG.values()],
+                    "installer": {"phase": "idle"}, "running": False, "plan": None,
+                    "install_enabled": False, "launch_enabled": False}
+        return await self._applications.status() | {"available": True}
+
+    async def application_action(self, serial: str, action: str, values: dict) -> dict:
+        if not self._applications:
+            raise RadioError("Configure persistent application storage on the USB host")
+        manager = self._applications
+        if action == "handoff":
+            return await manager.acquire(self, serial, values["app_id"], values["confirmed"])
+        if action == "release":
+            return await manager.release(self, serial, values["confirmed_closed"])
+        if action == "launch":
+            return await manager.launch(self, serial, values["app_id"], values["confirmed"])
+        if action == "stop":
+            return await manager.stop()
+        if action == "link":
+            return await manager.save_link(values["app_id"], values["url"])
+        if action == "prepare_install":
+            return await manager.prepare_install(values["apps"])
+        if action == "install":
+            return await manager.install(self, values["plan_id"], values["confirmed"])
+        raise RadioError("Unknown application action")
+
     async def close(self) -> None:
         self._closed = True
         await self.stop()
         if self._firmware:
             await self._firmware.wait()
+        if self._applications:
+            await self._applications.close()

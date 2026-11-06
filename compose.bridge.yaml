@@ -8,6 +8,7 @@ services:
       - "${HACKRF_BRIDGE_BIND:-127.0.0.1}:8099:8099"
     environment:
       HACKRF_BRIDGE_TOKEN: "${HACKRF_BRIDGE_TOKEN:?Set a random token of at least 32 characters in .env}"
+      HACKRF_RECEIVE_TOKEN: "${HACKRF_RECEIVE_TOKEN:-}"
     # Map the HackRF device only. Update after a USB reconnect if its number changes.
     devices:
       - "${HACKRF_USB_DEVICE:?Set the HackRF path, e.g. /dev/bus/usb/001/005}"

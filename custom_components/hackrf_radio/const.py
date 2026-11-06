@@ -1,7 +1,7 @@
 """Shared constants; kept independent of Home Assistant for the bridge."""
 
 DOMAIN = "hackrf_radio"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 PLATFORMS = ["sensor", "binary_sensor", "switch", "button"]
 DEFAULT_SETTINGS = {
     "start_mhz": 430,

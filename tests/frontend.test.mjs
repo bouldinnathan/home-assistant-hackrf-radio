@@ -188,3 +188,74 @@ test("firmware preparation sends only catalog ID and never starts installation",
   assert.ok(!("confirmation" in command));
   assert.equal(calls.some((message) => message.action === "install"), false);
 });
+
+function appsSample() {
+  const data = structuredClone(sample);
+  const make = (id, name, packages = []) => ({ id, name, packages, systems: ["Linux"], category: "Receiver", description: "Receive software",
+    website: "https://example.org/project", install_url: "https://example.org/install", installed: true, launch: [id] });
+  data.applications = { available: true, owner: { phase: "home_assistant" }, installer: { phase: "idle" },
+    catalog: [make("gqrx", "Gqrx", ["gqrx-sdr"]), make("gnuradio", "GNU Radio", ["gnuradio"]), make("sdrpp", "SDR++")],
+    running: false, install_enabled: false, launch_enabled: false, plan: null };
+  return data;
+}
+
+test("apps tab contains its own controls and software links are escaped", async (t) => {
+  const data = appsSample();
+  data.applications.catalog[0].name = '<img src=x onerror="alert(1)">';
+  data.applications.catalog[0].web_url = "javascript:alert(1)";
+  const { root, window } = await mount(t, { data });
+  assert.ok(root.querySelector("#spectrum-view").contains(root.querySelector("#spectrum")));
+  assert.ok(root.querySelector("#apps-view").contains(root.querySelector("#capture-form")));
+  root.querySelector("#show-apps").click();
+  assert.equal(root.querySelector("#spectrum-view").hidden, true);
+  assert.equal(root.querySelector("#apps-view").hidden, false);
+  assert.equal(root.querySelectorAll(".software-card").length, 3);
+  assert.equal(root.querySelector(".software-card h3").textContent, data.applications.catalog[0].name);
+  assert.equal(root.querySelector("img"), null);
+  assert.equal(root.querySelector("a[href^='javascript:']"), null);
+  root.querySelector("#app-search").value = "GNU Radio";
+  root.querySelector("#app-search").dispatchEvent(new window.Event("input"));
+  assert.equal([...root.querySelectorAll(".software-card")].filter((card) => !card.hidden).length, 1);
+});
+
+test("USB handoff requires acknowledgement and external ownership blocks radio actions", async (t) => {
+  const data = appsSample();
+  const { root, panel, window, calls } = await mount(t, { data });
+  assert.equal(root.querySelector("#app-handoff").disabled, true);
+  root.querySelector("#external-confirm").checked = true;
+  root.querySelector("#external-confirm").dispatchEvent(new window.Event("change"));
+  assert.equal(root.querySelector("#app-handoff").disabled, false);
+  assert.equal(root.querySelector("#app-launch").disabled, true); // Host did not opt in.
+  root.querySelector("#app-handoff").click(); await flush();
+  assert.equal(calls.at(-1).action, "handoff");
+  assert.equal(calls.at(-1).values.confirmed, true);
+  data.applications.owner = { phase: "external", name: "Gqrx", serial: data.serial };
+  panel._update(data);
+  for (const id of ["sweep", "start", "capture-start", "firmware-prepare"]) assert.equal(root.querySelector(`#${id}`).disabled, true);
+  assert.equal(root.querySelector("#app-release").disabled, true);
+  root.querySelector("#external-closed").checked = true; panel._buttons();
+  assert.equal(root.querySelector("#app-release").disabled, false);
+});
+
+test("package choices make a review request without starting an install", async (t) => {
+  const { root, window, calls } = await mount(t, { data: appsSample() });
+  const choice = root.querySelector('[data-install-app="gqrx"]');
+  choice.checked = true; choice.dispatchEvent(new window.Event("change"));
+  root.querySelector("#packages-prepare").click(); await flush();
+  const request = calls.find((message) => message.action === "prepare_install");
+  assert.deepEqual(Array.from(request.values.apps), ["gqrx"]);
+  assert.equal(calls.some((message) => message.action === "install"), false);
+  assert.equal(root.querySelector("#packages-install").disabled, true);
+});
+
+test("direct capture form sends numeric RX parameters and current receive gains", async (t) => {
+  const { root, window, calls } = await mount(t, { data: appsSample() });
+  root.querySelector("#capture-form").dispatchEvent(new window.Event("submit", { cancelable: true }));
+  await flush();
+  const command = calls.find((message) => message.type === "hackrf_radio/capture");
+  assert.equal(command.settings.frequency_hz, 433920000);
+  assert.equal(command.settings.sample_rate, 8000000);
+  assert.equal(command.settings.lna_gain, settings.lna_gain);
+  assert.ok(!("amp" in command.settings));
+  assert.ok(!("transmit" in command.settings));
+});

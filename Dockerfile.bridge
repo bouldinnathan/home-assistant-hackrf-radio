@@ -10,11 +10,11 @@ RUN curl -fsSL https://github.com/greatscottgadgets/hackrf/archive/refs/tags/v20
     && cmake --build /src/build --parallel 2 \
     && cmake --install /src/build
 
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm AS bridge-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 libfftw3-single3 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=hackrf-build /usr/local/lib/libhackrf* /usr/local/lib/
-COPY --from=hackrf-build /usr/local/bin/hackrf_info /usr/local/bin/hackrf_sweep /usr/local/bin/hackrf_spiflash /usr/local/bin/
+COPY --from=hackrf-build /usr/local/bin/hackrf_info /usr/local/bin/hackrf_sweep /usr/local/bin/hackrf_spiflash /usr/local/bin/hackrf_transfer /usr/local/bin/
 COPY --from=hackrf-build /src/COPYING /usr/share/doc/hackrf/COPYING
 RUN ldconfig
 WORKDIR /app
@@ -22,3 +22,13 @@ RUN pip install --no-cache-dir aiohttp==3.14.3
 COPY custom_components/hackrf_radio /app/custom_components/hackrf_radio
 EXPOSE 8099
 CMD ["python", "-m", "custom_components.hackrf_radio.bridge", "--host", "0.0.0.0", "--firmware-dir", "/var/lib/hackrf/firmware"]
+
+# Optional preinstalled software image. Override with reviewed comma-separated
+# catalog IDs; no downloaded scripts, arbitrary packages or shell fragments.
+FROM bridge-runtime AS tools
+ARG HACKRF_APPS=soapy_remote,inspectrum
+RUN python -m custom_components.hackrf_radio.software install --apps "$HACKRF_APPS" --confirm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Preserve the lean bridge as the default build target.
+FROM bridge-runtime AS final

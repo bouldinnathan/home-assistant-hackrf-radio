@@ -33,6 +33,9 @@ class HackRFRadioPanel extends HTMLElement {
     this._fwActing = false;
     this._firmwareKey = null;
     this._firmwarePlanId = null;
+    this._appsKey = null;
+    this._packagePlanId = null;
+    this._appActing = false;
     this._mount();
     this._observer = new ResizeObserver(() => this._draw());
     this._observer.observe(this.shadowRoot.querySelector(".plots"));
@@ -52,9 +55,10 @@ class HackRFRadioPanel extends HTMLElement {
         .layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px}.card{padding:20px}.card h3{font-size:15px;margin:0 0 14px;font-weight:600}.plothead{display:flex;align-items:center;justify-content:space-between;gap:12px}.badge{font-size:11px;color:var(--primary-color,#6bd6cc);background:var(--secondary-background-color,#20323a);padding:6px 9px;border-radius:20px}.plots{min-width:0}canvas{width:100%;display:block}#spectrum{height:290px}#waterfall{height:180px;background:#101725;border-radius:6px}.legend{font-size:11px;display:flex;justify-content:space-between;gap:10px;color:var(--secondary-text-color,#9aaabd);margin:10px 0 16px}
         .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}button.action{border:1px solid var(--divider-color,#344255);border-radius:7px;background:var(--secondary-background-color,#253144);padding:10px 13px}.primary{background:var(--primary-color,#6bd6cc)!important;color:var(--text-primary-color,#102322)!important;border-color:transparent!important}#stop{border-color:#bb715a;color:var(--error-color,#efa68e)}
         .firmware-card{margin-top:16px}.firmware-card p,.firmware-card label{font-size:12px}.firmware-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.check{display:flex;align-items:flex-start;gap:8px;margin:12px 0;line-height:1.5}.check input{width:auto;margin:2px 0 0}.firmware-card a{color:var(--primary-color,#6bd6cc)}
+        .view-tabs{display:flex;gap:8px;margin-bottom:18px}.view-tabs [aria-selected=true]{border-color:var(--primary-color,#6bd6cc);color:var(--primary-color,#6bd6cc)}.app-tools{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.software-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.software-card{display:flex;flex-direction:column;gap:9px}.software-card h3{margin:0}.software-card p{font-size:13px;flex:1}.software-card small{color:var(--secondary-text-color,#9aaabd)}.software-card a,#apps-view a{color:var(--primary-color,#6bd6cc)}#apps-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.software-links{display:flex;flex-wrap:wrap;gap:14px}.software-card .check{margin:0}.app-header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}#owner-status{padding:12px;border-left:3px solid var(--primary-color,#6bd6cc);margin-bottom:16px}.software-card .action{align-self:flex-start}
         form{display:grid;gap:14px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:7px;font-size:12px;color:var(--secondary-text-color,#9aaabd)}.help{font-size:12px}.safety{margin-top:16px;border-left:3px solid var(--primary-color,#6bd6cc);padding:12px 14px;background:var(--secondary-background-color,#20303b);border-radius:4px;font-size:12px;line-height:1.6}.safety strong{display:block}.safety a{color:var(--primary-color,#6bd6cc)}.details{margin-top:16px;font-size:12px;overflow-wrap:anywhere}.error{background:var(--error-color,#b74747);color:white;padding:12px 16px;border-radius:8px;margin-bottom:16px}.empty{padding:45px;text-align:center}.notice{color:var(--warning-color,#e7b969);font-size:12px;margin-top:10px}[hidden]{display:none!important}:focus-visible{outline:2px solid var(--primary-color,#6bd6cc);outline-offset:3px}
         @media(max-width:1000px){.layout{grid-template-columns:1fr}.settings{max-width:none}form{grid-template-columns:1fr 1fr}form h3,form .pair,form button,form .help{grid-column:1/-1}}
-        @media(max-width:600px){main{padding:14px}header{padding:0 10px}header span{display:none}.top{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat{padding:12px}.value{font-size:21px}.card{padding:14px}#spectrum{height:220px}h2{font-size:23px}form{grid-template-columns:1fr}form>*{grid-column:1/-1}}
+        @media(max-width:600px){main{padding:14px}header{padding:0 10px}header span{display:none}.top{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat{padding:12px}.value{font-size:21px}.card{padding:14px}#spectrum{height:220px}h2{font-size:23px}form{grid-template-columns:1fr}form>*{grid-column:1/-1}.app-tools{grid-template-columns:1fr}.app-header{align-items:flex-start;flex-direction:column}}
       </style>
       <header><button class="menu" aria-label="Open sidebar">☰</button><h1>HackRF Radio</h1><span>Local spectrum monitor</span></header>
       <main>
@@ -62,6 +66,8 @@ class HackRFRadioPanel extends HTMLElement {
         <div id="error" class="error" role="alert" hidden></div>
         <div id="empty" class="card empty" hidden><h3>Add your HackRF</h3><p>Open Settings → Devices & services → Add integration → HackRF Radio.</p><p>Use the bridge for Home Assistant OS, or local USB where the HackRF tools are installed.</p><a href="/config/integrations/dashboard/add?domain=hackrf_radio">Set up HackRF Radio</a></div>
         <section id="workspace">
+          <nav class="view-tabs" aria-label="Radio workspace"><button class="action" id="show-spectrum" aria-selected="true">Spectrum & firmware</button><button class="action" id="show-apps" aria-selected="false">Apps & direct control</button></nav>
+          <div id="spectrum-view">
           <div class="stats">
             <div class="stat"><small>Receiver</small><div class="value" id="status">Connecting</div></div>
             <div class="stat"><small>Peak level</small><div class="value"><b id="peak">—</b> <span>dB</span></div></div>
@@ -109,6 +115,40 @@ class HackRFRadioPanel extends HTMLElement {
               </div>
             </aside>
           </div>
+          </div>
+          <section id="apps-view" hidden>
+            <div id="owner-status" role="status" aria-live="polite">Home Assistant controls the USB host.</div>
+            <div class="app-tools">
+              <div class="card"><h3>External app control</h3>
+                <label>Application<select id="external-app"></select></label>
+                <label class="check"><input id="external-confirm" type="checkbox">Other SDR apps are closed. I understand this app controls its own RF settings, including any transmit, amplifier or bias features.</label>
+                <div class="actions"><button class="action" id="app-handoff">Hand off USB</button><button class="action" id="app-launch">Launch on USB host</button><button class="action" id="app-stop">Stop managed app</button></div>
+                <label class="check"><input id="external-closed" type="checkbox">I have closed the external app and released its USB connections.</label>
+                <button class="action" id="app-release">Return control to HA</button>
+                <p class="help">Handoff pauses HA scans, capture and firmware operations across this USB host. Ownership never expires automatically. Desktop launch requires an opted-in desktop bridge; headless HA cannot display a desktop app.</p>
+                <pre id="soapy-connection"></pre>
+              </div>
+              <div class="card"><h3>Direct receive capture</h3>
+                <form id="capture-form">
+                  <label>Center frequency · Hz<input name="frequency_hz" type="number" min="1000000" max="6000000000" step="1" value="433920000" required></label>
+                  <label>Sample rate<select name="sample_rate"><option value="8000000">8 Msps</option><option value="10000000">10 Msps</option><option value="12500000">12.5 Msps</option><option value="16000000">16 Msps</option><option value="20000000">20 Msps</option></select></label>
+                  <label>Complex samples · up to 8 MB<input name="samples" type="number" min="1024" max="4000000" step="1" value="1000000" required></label>
+                  <button class="action" id="capture-start">Capture I/Q once</button>
+                </form>
+                <p class="help">Uses the current IF/VGA gain settings. RF amplifier and antenna bias stay off. Signed 8-bit interleaved I/Q can be imported into inspectrum, URH or GNU Radio.</p>
+                <pre id="capture-info">No capture yet.</pre>
+                <div class="actions"><button class="action" id="capture-download" disabled>Download I/Q</button><button class="action" id="capture-metadata" disabled>Download metadata</button></div>
+                <p class="help">Other programs can also use the authenticated bridge receive API. Give them a separate receive token, rather than the administrative bridge token. <a href="https://github.com/bouldinnathan/home-assistant-hackrf-radio/blob/main/docs/APPS_AND_CONTROL.md" target="_blank" rel="noopener noreferrer">API and app setup ↗</a></p>
+              </div>
+            </div>
+            <div class="card" style="margin-bottom:18px"><h3>Install on the USB host</h3><p>Select package-backed apps below, then review the exact Debian/Ubuntu package plan. Other platforms and apps use their upstream install links.</p>
+              <div class="actions"><button class="action" id="packages-prepare">Review selected packages</button></div><pre id="package-plan"></pre>
+              <label class="check"><input id="packages-confirm" type="checkbox">I approve installing these packages on the USB host, including their dependencies and the displayed service policy.</label>
+              <button class="action" id="packages-install" disabled>Install reviewed packages</button><p class="help" id="installer-status"></p>
+            </div>
+            <div class="app-header"><h3>HackRF software library</h3><label>Filter apps<input id="app-search" type="search" placeholder="Receiver, analysis, satellite…"></label></div>
+            <div class="software-grid" id="software-catalog"></div>
+          </section>
         </section>
       </main>`;
     const root = this.shadowRoot;
@@ -118,10 +158,36 @@ class HackRFRadioPanel extends HTMLElement {
       this._history = []; this._lastTimestamp = null; this._settingsKey = null;
       this._dirty = false; this._data = null; this._draw();
       this._firmwareKey = null; this._firmwarePlanId = null;
+      this._appsKey = null;
+      this._packagePlanId = null;
       this._load(this._generation).catch((error) => this._error(error.message));
     };
     for (const action of ["sweep", "start", "stop"]) root.querySelector(`#${action}`).onclick = () => this._control(action);
     for (const action of ["prepare", "install", "verify"]) root.querySelector(`#firmware-${action}`).onclick = () => this._firmware(action);
+    for (const view of ["spectrum", "apps"]) root.querySelector(`#show-${view}`).onclick = () => {
+      root.querySelector("#spectrum-view").hidden = view !== "spectrum";
+      root.querySelector("#apps-view").hidden = view !== "apps";
+      for (const name of ["spectrum", "apps"]) root.querySelector(`#show-${name}`).setAttribute("aria-selected", String(name === view));
+      this._draw();
+    };
+    for (const action of ["handoff", "launch", "stop", "release"]) root.querySelector(`#app-${action}`).onclick = () => {
+      const values = action === "release" ? { confirmed_closed: root.querySelector("#external-closed").checked }
+        : action === "stop" ? {} : { app_id: root.querySelector("#external-app").value, confirmed: root.querySelector("#external-confirm").checked };
+      this._applications(action, values);
+    };
+    for (const id of ["external-app", "external-confirm", "external-closed", "packages-confirm"]) root.querySelector(`#${id}`).onchange = () => this._buttons();
+    root.querySelector("#app-search").oninput = () => this._filterApps();
+    root.querySelector("#packages-prepare").onclick = () => this._applications("prepare_install", { apps: [...root.querySelectorAll("[data-install-app]:checked")].map((input) => input.dataset.installApp) });
+    root.querySelector("#packages-install").onclick = () => this._applications("install", { plan_id: this._data?.applications?.plan?.plan_id, confirmed: root.querySelector("#packages-confirm").checked });
+    root.querySelector("#capture-form").onsubmit = (event) => {
+      event.preventDefault();
+      const settings = Object.fromEntries([...new FormData(event.target)].map(([key, value]) => [key, Number(value)]));
+      this._capture({ ...settings, lna_gain: this._data.settings.lna_gain, vga_gain: this._data.settings.vga_gain });
+    };
+    root.querySelector("#capture-download").onclick = () => this._downloadCapture();
+    root.querySelector("#capture-metadata").onclick = () => {
+      if (this._data?.capture) this._downloadBlob(new Blob([JSON.stringify(this._data.capture, null, 2)], { type: "application/json" }), `hackrf-${this._data.capture.capture_id}.json`);
+    };
     for (const id of ["firmware-serial", "firmware-power", "firmware-hardware", "firmware-sd"]) root.querySelector(`#${id}`).oninput = () => this._buttons();
     for (const [name, max, step] of [["lna_gain", 40, 8], ["vga_gain", 62, 2]]) {
       const select = root.querySelector(`[name=${name}]`);
@@ -209,15 +275,28 @@ class HackRFRadioPanel extends HTMLElement {
     const root = this.shadowRoot;
     const firmware = this._data?.firmware || {};
     const blocked = ["backing_up", "writing", "verifying", "awaiting_reset", "recovery_required"].includes(firmware.phase);
-    for (const action of ["sweep", "start", "apply"]) root.querySelector(`#${action}`).disabled = Boolean(!this._data || this._acting || this._fwActing || this._data.busy || blocked);
+    const apps = this._data?.applications || {};
+    const external = (apps.owner?.phase || "home_assistant") !== "home_assistant";
+    const packagesBusy = ["installing", "recovery_required"].includes(apps.installer?.phase);
+    const busy = Boolean(!this._data || this._acting || this._fwActing || this._appActing || this._data.busy || blocked || external || packagesBusy);
+    for (const action of ["sweep", "start", "apply", "capture-start"]) root.querySelector(`#${action}`).disabled = busy;
     root.querySelector("#stop").disabled = !this._selected || Boolean(firmware.active);
-    root.querySelector("#firmware-prepare").disabled = Boolean(!this._data || this._acting || this._fwActing || blocked || !root.querySelector("#firmware-target").value);
+    root.querySelector("#firmware-prepare").disabled = busy || !root.querySelector("#firmware-target").value;
     const plan = firmware.plan;
     const confirmed = plan && root.querySelector("#firmware-serial").value === plan.serial
       && root.querySelector("#firmware-power").checked && root.querySelector("#firmware-hardware").checked
       && (plan.family !== "mayhem" || root.querySelector("#firmware-sd").checked);
-    root.querySelector("#firmware-install").disabled = Boolean(!confirmed || this._fwActing || blocked || this._acting);
-    root.querySelector("#firmware-verify").disabled = Boolean(this._fwActing || firmware.active);
+    root.querySelector("#firmware-install").disabled = Boolean(!confirmed || busy);
+    root.querySelector("#firmware-verify").disabled = Boolean(this._fwActing || firmware.active || external || packagesBusy || this._appActing);
+    const app = (apps.catalog || []).find((entry) => entry.id === root.querySelector("#external-app").value);
+    root.querySelector("#app-handoff").disabled = busy || apps.available === false || !app || !root.querySelector("#external-confirm").checked;
+    root.querySelector("#app-launch").disabled = root.querySelector("#app-handoff").disabled || !apps.launch_enabled || !app?.installed || !app?.launch?.length;
+    root.querySelector("#app-stop").disabled = !apps.running || this._appActing;
+    root.querySelector("#app-release").disabled = !external || apps.running || apps.owner?.serial !== this._data?.serial || !root.querySelector("#external-closed").checked || this._appActing;
+    root.querySelector("#packages-prepare").disabled = busy || !root.querySelectorAll("[data-install-app]:checked").length;
+    root.querySelector("#packages-install").disabled = busy || !apps.install_enabled || !apps.plan || !root.querySelector("#packages-confirm").checked;
+    root.querySelector("#capture-download").disabled = !this._data?.capture || this._appActing;
+    root.querySelector("#capture-metadata").disabled = !this._data?.capture;
   }
 
   async _firmware(action) {
@@ -275,6 +354,125 @@ class HackRFRadioPanel extends HTMLElement {
     root.querySelector("#firmware-backup").textContent = firmware.backup ? `Backup on USB host:\n${firmware.backup}\nSHA256: ${firmware.backup_sha256}` : "";
   }
 
+  async _applications(action, values = {}) {
+    if (!this._selected || this._appActing) return;
+    const entry = this._selected, generation = this._generation;
+    this._appActing = true; this._buttons(); this._error("");
+    try {
+      const data = await this._hass.callWS({ type: "hackrf_radio/applications", entry_id: entry, action, values });
+      if (generation === this._generation && entry === this._selected) {
+        if (["handoff", "release", "launch"].includes(action)) {
+          this.shadowRoot.querySelector("#external-confirm").checked = false;
+          this.shadowRoot.querySelector("#external-closed").checked = false;
+        }
+        if (action === "prepare_install") this.shadowRoot.querySelector("#packages-confirm").checked = false;
+        this._update(data);
+      }
+    } catch (error) {
+      if (generation === this._generation) this._error(error.message || "Application operation failed");
+    } finally {
+      if (generation === this._generation) { this._appActing = false; this._buttons(); }
+    }
+  }
+
+  async _capture(settings) {
+    if (!this._selected || this._appActing) return;
+    const entry = this._selected, generation = this._generation;
+    this._appActing = true; this._buttons(); this._error("");
+    try {
+      const data = await this._hass.callWS({ type: "hackrf_radio/capture", entry_id: entry, settings });
+      if (generation === this._generation && entry === this._selected) this._update(data);
+    } catch (error) {
+      if (generation === this._generation) this._error(error.message || "Receive capture failed");
+    } finally {
+      if (generation === this._generation) { this._appActing = false; this._buttons(); }
+    }
+  }
+
+  async _downloadCapture() {
+    const capture = this._data?.capture;
+    if (!capture || !this._selected) return;
+    try {
+      const response = await this._hass.fetchWithAuth(`/api/hackrf_radio/${encodeURIComponent(this._selected)}/captures/${encodeURIComponent(capture.capture_id)}`);
+      if (!response.ok) throw new Error("Capture is unavailable or has expired; take a new capture.");
+      this._downloadBlob(await response.blob(), `hackrf-${capture.capture_id}.cs8`);
+    } catch (error) { this._error(error.message); }
+  }
+
+  _downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = name;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  _externalLink(url, label) {
+    const link = document.createElement("a");
+    try {
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+      link.href = parsed.href;
+    } catch { return null; }
+    link.textContent = label; link.target = "_blank"; link.rel = "noopener noreferrer";
+    return link;
+  }
+
+  _filterApps() {
+    const query = this.shadowRoot.querySelector("#app-search").value.toLowerCase();
+    for (const card of this.shadowRoot.querySelectorAll(".software-card")) card.hidden = !card.textContent.toLowerCase().includes(query);
+  }
+
+  _updateApps(data) {
+    const root = this.shadowRoot;
+    const apps = data.applications || { available: false, catalog: [], owner: { phase: "home_assistant" }, installer: { phase: "idle" } };
+    const owner = apps.owner || { phase: "home_assistant" };
+    root.querySelector("#owner-status").textContent = owner.phase === "home_assistant"
+      ? "Home Assistant owns the USB host. Managed receive captures keep RF amplifier and bias power off."
+      : `USB handed to ${owner.name || "external application"} · serial ${owner.serial || "unknown"}. HA device probes and firmware operations are paused. Close the app before returning control.`;
+    const catalog = apps.catalog || [];
+    const key = JSON.stringify(catalog);
+    if (key !== this._appsKey) {
+      this._appsKey = key;
+      const selected = root.querySelector("#external-app").value;
+      root.querySelector("#external-app").replaceChildren(...catalog.map((app) => new Option(app.name, app.id)));
+      if (catalog.some((app) => app.id === selected)) root.querySelector("#external-app").value = selected;
+      root.querySelector("#software-catalog").replaceChildren(...catalog.map((app) => {
+        const card = document.createElement("article"); card.className = "card software-card";
+        const title = document.createElement("h3"); title.textContent = app.name;
+        const details = document.createElement("small"); details.textContent = `${app.category} · ${(app.systems || []).join(" / ")}${app.installed ? " · executable found on USB host" : ""}`;
+        const description = document.createElement("p"); description.textContent = app.description;
+        const links = document.createElement("div"); links.className = "software-links";
+        for (const [url, label] of [[app.website, "Project"], [app.install_url, "Install / download"], [app.web_url, "Open app"]]) {
+          const link = this._externalLink(url, label); if (link) links.append(link);
+        }
+        card.append(title, details, description, links);
+        if (app.packages?.length) {
+          const label = document.createElement("label"); label.className = "check";
+          const input = document.createElement("input"); input.type = "checkbox"; input.dataset.installApp = app.id; input.onchange = () => this._buttons();
+          label.append(input, document.createTextNode("Include in Debian/Ubuntu package plan")); card.append(label);
+        }
+        const input = document.createElement("input"); input.type = "url"; input.value = app.web_url || "";
+        input.placeholder = "Optional app web URL on your LAN"; input.setAttribute("aria-label", `${app.name} web URL`);
+        const save = document.createElement("button"); save.className = "action"; save.textContent = "Save web link";
+        save.onclick = () => this._applications("link", { app_id: app.id, url: input.value });
+        card.append(input, save);
+        return card;
+      }));
+      this._filterApps();
+    }
+    const plan = apps.plan;
+    if ((plan?.plan_id || null) !== this._packagePlanId) {
+      this._packagePlanId = plan?.plan_id || null;
+      root.querySelector("#packages-confirm").checked = false;
+    }
+    root.querySelector("#package-plan").textContent = plan ? `${plan.commands.map((command) => command.join(" ")).join("\n")}\n\n${plan.service_policy}\nExpires: ${new Date(plan.expires_at * 1000).toLocaleTimeString()}` : "Select package-backed apps to review an installation plan.";
+    root.querySelector("#installer-status").textContent = `${apps.installer?.phase || "idle"} · ${apps.installer?.message || (apps.install_enabled ? "Managed package installation is enabled on this USB host." : "Managed install is disabled. Use the reviewed recipe on a Debian/Ubuntu USB host, or an upstream installer on your computer.")}`;
+    root.querySelector("#soapy-connection").textContent = `SoapyRemote client device args (native USB-host bridge):\ndriver=remote,remote=${apps.soapy_bind || "127.0.0.1"}:55132,remote:driver=hackrf,remote:serial=${data.serial},remote:prot=tcp\nLoopback is the default. Remote streaming needs an explicitly configured private bind IP, trusted VPN/firewall, and access to negotiated stream ports. A single-port SSH tunnel is insufficient.`;
+    const capture = data.capture;
+    root.querySelector("#capture-info").textContent = capture ? `${capture.byte_count} bytes · ${capture.format} · ${capture.settings.sample_rate / 1e6} Msps\nCenter ${capture.settings.frequency_hz} Hz · ${capture.captured_at}\nSHA256: ${capture.sha256}` : "No capture yet. The latest four completed captures are retained on the USB host.";
+  }
+
   _update(data) {
     this._data = data;
     const root = this.shadowRoot;
@@ -302,6 +500,8 @@ class HackRFRadioPanel extends HTMLElement {
     set("device", device ? `${device.model} · ${device.revision}\nFirmware ${device.firmware} · API ${device.api}\nSerial ${data.serial}` : "Device details unavailable");
     set("warning", device?.warning || "");
     this._updateFirmware(data);
+    this._updateApps(data);
+    if ((data.applications?.owner?.phase || "home_assistant") !== "home_assistant") set("status", "External app");
     this._buttons(); this._draw();
   }
 

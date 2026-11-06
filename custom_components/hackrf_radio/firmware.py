@@ -243,6 +243,7 @@ class FirmwareManager:
         self._preparing = True
         try:
             async with self.radio._lock:
+                await self.radio._assert_managed_access()
                 device = await self._device(serial)
                 validate_target(device, release)
                 help_text = await self.radio._run(["hackrf_spiflash", "-h"])
@@ -285,6 +286,11 @@ class FirmwareManager:
             raise RadioBusy("Radio is busy or closed")
         # Acquire before returning to HTTP/WS so a scan cannot race the job.
         await self.radio._lock.acquire()
+        try:
+            await self.radio._assert_managed_access()
+        except BaseException:
+            self.radio._lock.release()
+            raise
         self._plans.pop(serial)
         self._states[serial] = {"phase": "backing_up", "serial": serial, "plan_id": plan_id,
                                 "target": plan["public"]["target"], "version": plan["public"]["version"],
@@ -398,6 +404,7 @@ class FirmwareManager:
         if self.radio._lock.locked():
             raise RadioBusy("Radio is busy")
         async with self.radio._lock:
+            await self.radio._assert_managed_access()
             device = await self._device(serial)
             if not device.supported or device.board_id != state["board_id"] or device.firmware != state["version"]:
                 raise RadioError("The selected device has not booted the expected firmware; keep monitoring off and check reset/mode/USB mapping")

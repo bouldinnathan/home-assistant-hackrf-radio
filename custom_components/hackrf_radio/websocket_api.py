@@ -18,7 +18,7 @@ def coordinator_for(hass, entry_id):
 
 @callback
 def async_register_commands(hass):
-    for handler in (list_radios, get_radio, control_radio, firmware_radio):
+    for handler in (list_radios, get_radio, control_radio, firmware_radio, applications_radio, capture_radio):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -38,6 +38,7 @@ def list_radios(hass, connection, msg):
 async def get_radio(hass, connection, msg):
     try:
         coordinator = coordinator_for(hass, msg["entry_id"])
+        await coordinator.async_applications("status")
         await coordinator.async_firmware("status")
         connection.send_result(msg["id"], coordinator.snapshot(include_spectrum=True))
     except RadioError as err:
@@ -86,3 +87,33 @@ async def firmware_radio(hass, connection, msg):
         connection.send_result(msg["id"], result)
     except (RadioError, ValueError) as err:
         connection.send_error(msg["id"], "firmware_error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hackrf_radio/applications", vol.Required("entry_id"): str,
+    vol.Required("action"): vol.In(["status", "handoff", "release", "launch", "stop", "link", "prepare_install", "install"]),
+    vol.Optional("values", default={}): dict,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def applications_radio(hass, connection, msg):
+    try:
+        coordinator = coordinator_for(hass, msg["entry_id"])
+        result = await coordinator.async_applications(msg["action"], **msg["values"])
+        connection.send_result(msg["id"], result)
+    except (RadioError, ValueError, TypeError) as err:
+        connection.send_error(msg["id"], "application_error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hackrf_radio/capture", vol.Required("entry_id"): str,
+    vol.Required("settings"): dict,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def capture_radio(hass, connection, msg):
+    try:
+        result = await coordinator_for(hass, msg["entry_id"]).async_capture(msg["settings"])
+        connection.send_result(msg["id"], result)
+    except (RadioError, ValueError) as err:
+        connection.send_error(msg["id"], "capture_error", str(err))

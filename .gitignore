@@ -7,3 +7,6 @@ __pycache__/
 dist/
 node_modules/
 firmware-data/
+applications-data/
+/applications/
+/.storage/

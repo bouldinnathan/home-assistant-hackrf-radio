@@ -2,7 +2,7 @@
 
 A HACS custom integration for **receive-only spectrum monitoring** with a HackRF One or compatible HackRF Pro. It follows the config-entry, custom sidebar panel, WebSocket and entity patterns in [your MeshNet integration](https://github.com/bouldinnathan/home-assistant-mesh-radio).
 
-The **HackRF Radio** sidebar includes a spectrum plot, a browser-local waterfall, band presets, IF/LNA and VGA gain settings, single sweeps, periodic monitoring, device information and reviewed firmware updates with backup and readback verification. Native HA entities provide peak level, peak frequency, median noise floor, bin count, last sweep, connectivity, signal threshold, a monitoring switch and a sweep button.
+The **HackRF Radio** sidebar includes spectrum/waterfall views, band/gain controls, periodic monitoring, reviewed firmware maintenance, an **Apps & direct control** workspace and a software library. External apps can use a scoped receive API, explicitly take USB ownership, or use an optional managed SoapyRemote server. Native HA entities provide peak level, peak frequency, median noise floor, bin count, last sweep, connectivity, signal threshold, a monitoring switch and a sweep button.
 
 ## Device protection
 
@@ -36,7 +36,7 @@ Repository: [bouldinnathan/home-assistant-hackrf-radio](https://github.com/bould
 
 ### Manual
 
-Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.2.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
+Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.3.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
 
 ## Connecting the USB device
 
@@ -58,7 +58,7 @@ Edit `.env` with the generated token, the HackRF's `/dev/bus/usb/BBB/DDD` path a
 docker compose -f compose.bridge.yaml up -d --build
 ```
 
-The image builds the **host software only** from the checksum-verified official HackRF **v2026.01.3** release. It includes `hackrf_info`, `hackrf_sweep`, `hackrf_spiflash` and libhackrf. Firmware images are downloaded only when preparing an update, and are checked against the reviewed catalog. Docker build itself never contacts a device. Build/network access is required. Compose maps one USB device, drops capabilities and uses a read-only root filesystem, with a persistent `hackrf-firmware` volume for backups and journals. Do not delete that volume during an update or recovery. If a manual reset changes the USB device number, update `.env` and recreate the container after the write/readback phase is finished.
+The image builds the **host software only** from the checksum-verified official HackRF **v2026.01.3** release. It includes `hackrf_info`, `hackrf_sweep`, `hackrf_transfer`, `hackrf_spiflash` and libhackrf. Firmware images are downloaded only when preparing an update, and are checked against the reviewed catalog. Docker build itself never contacts a device. Build/network access is required. Compose maps one USB device, drops capabilities and uses a read-only root filesystem, with a persistent `hackrf-firmware` volume for backups, journals, app ownership and bounded captures. Do not delete that volume during an update or recovery. If a manual reset changes the USB device number, update `.env` and recreate the container after the write/readback phase is finished.
 
 Enter `http://YOUR_USB_HOST_LAN_IP:8099` and the token in HA. Restrict access to trusted hosts on your LAN. Use a TLS reverse proxy for untrusted networks; the bridge client verifies HTTPS certificates and refuses redirects. Never forward the bridge to the public Internet.
 
@@ -101,12 +101,31 @@ For a device named **Workbench**, the main entities are `switch.workbench_monito
 
 The panel is admin-only and uses HA's authenticated WebSocket connection. Bridge credentials remain on the backend and are excluded from panel responses and diagnostics. Full FFT arrays are kept out of entity states and recorder history; the panel receives at most 1024 peak-preserving points. The waterfall stores up to 80 sweeps in the current browser session.
 
+## Other apps and direct control
+
+Open **Apps & direct control** for a library of **17 SDR projects plus a generic external-app handoff**. It includes Gqrx, GNU Radio, CubicSDR, SoapyRemote, inspectrum, SDR++, SDRangel, SatDump, SigDigger, URH, QSpectrumAnalyzer, SDR#, SDR Console, radioconda and more, with upstream project/download links and optional saved web links.
+
+- **Direct receive API:** authenticated scripts can request spectrum or signed 8-bit I/Q captures with frequency, sample-rate and IF/VGA settings. Captures are capped at 8 MB and can be downloaded through the bridge or the HA panel. A separate `HACKRF_RECEIVE_TOKEN` cannot flash firmware, install software, launch apps or change ownership.
+- **USB handoff:** pause HA USB operations before a native app opens the device. Ownership survives restarts, blocks firmware/capture activity and must be returned explicitly after the app closes. External apps control their own RF/amp/bias/TX settings; the integration's receive locks cannot constrain them.
+- **Managed launch:** explicitly opt in on the USB-host bridge to launch fixed catalog profiles. GUI apps need an unprivileged desktop session. SoapyRemote can provide native live tuning/streaming; it defaults to loopback and requires trusted VPN/firewall configuration for a private-address deployment.
+- **Installation:** five reviewed Debian/Ubuntu recipes cover SoapyRemote, Gqrx, CubicSDR, GNU Radio and inspectrum. Review the plan in the panel or CLI. Runtime installation requires a writable root bridge with explicit installer opt-in. Windows/macOS and other apps use upstream installers; HACS cannot install programs on your browser computer.
+
+For an optional image preinstalled with SoapyRemote and inspectrum:
+
+```sh
+docker compose -f compose.bridge.yaml -f compose.tools.yaml up -d --build
+```
+
+Set `HACKRF_APPS=soapy_remote,gqrx,cubicsdr,gnuradio,inspectrum` in `.env` to build a larger tools image. A headless container still has no desktop display, and no unauthenticated Soapy port is published. See [app setup, installation policies and the direct-control API](docs/APPS_AND_CONTROL.md), including an [external receive client](examples/receive_client.py).
+
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
 | No devices | USB cable/power, permissions, USB passthrough, native tool installation and PortaPack HackRF mode |
 | Busy | Close other SDR applications; only one capture is allowed per bridge/HA USB host |
+| External app owns USB | Close it and explicitly return control in Apps & direct control; the ownership record does not auto-expire |
+| App launch/install disabled | Check host opt-in, desktop/root requirements, storage and read-only-container limits in the app guide |
 | Firmware or self-test block | Read the exact identity and upstream compatibility documentation; a failed self-test is not repaired automatically |
 | Firmware recovery required | Retain the persistent backup/journal; inspect the failure and follow upstream recovery instructions |
 | Old/missing tool flags | Install current compatible host tools; the Docker bridge pins v2026.01.3 |

@@ -58,6 +58,15 @@ jobs:
       - run: docker build -f Dockerfile.bridge -t hackrf-bridge:test .
       - name: Check CLI without opening USB
         run: docker run --rm hackrf-bridge:test python -m custom_components.hackrf_radio.bridge --help
+      - name: Build optional software image
+        run: >-
+          docker build -f Dockerfile.bridge --target tools
+          --build-arg HACKRF_APPS=soapy_remote,gqrx,cubicsdr,gnuradio,inspectrum
+          -t hackrf-tools:test .
+      - name: Validate installed tools without opening USB
+        run: >-
+          docker run --rm hackrf-tools:test python -c
+          "import shutil,pathlib; assert all(shutil.which(name) for name in ['SoapySDRServer','gqrx','CubicSDR','gnuradio-companion','inspectrum']); assert pathlib.Path('/etc/systemd/system/soapyremote-server.service').readlink() == pathlib.Path('/dev/null')"
 
   hassfest:
     runs-on: ubuntu-latest
