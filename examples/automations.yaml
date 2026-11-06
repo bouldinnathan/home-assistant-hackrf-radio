@@ -1,0 +1,24 @@
+# Replace entity IDs with the IDs generated for your named radio.
+- alias: HackRF signal activity
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.workbench_signal_detected
+      to: "on"
+  actions:
+    - action: persistent_notification.create
+      data:
+        title: Radio activity
+        message: A receive sweep exceeded the configured relative-power threshold.
+
+- alias: HackRF scheduled receive sweep
+  triggers:
+    - trigger: time_pattern
+      minutes: "/5"
+  conditions:
+    - condition: state
+      entity_id: switch.workbench_monitoring
+      state: "off"
+  actions:
+    - action: button.press
+      target:
+        entity_id: button.workbench_sweep_now

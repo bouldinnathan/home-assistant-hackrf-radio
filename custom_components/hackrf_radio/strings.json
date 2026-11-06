@@ -1,0 +1,73 @@
+{
+  "title": "HackRF Radio",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your HackRF",
+        "description": "Choose where the HackRF USB device is connected.",
+        "menu_options": {
+          "bridge": "USB bridge (recommended for Home Assistant OS)",
+          "local": "Local USB (Core / Container with HackRF tools)"
+        }
+      },
+      "local": {
+        "title": "Check local USB",
+        "description": "Install hackrf_info and hackrf_sweep inside the Home Assistant runtime and allow access to the USB device. For Home Assistant OS, use the bridge instead. Select Submit to discover accessible radios. A PortaPack must be in HackRF mode."
+      },
+      "bridge": {
+        "title": "Connect to the HackRF bridge",
+        "description": "Run the supplied bridge on the Linux computer with the HackRF attached. Enter its URL and HACKRF_BRIDGE_TOKEN. Use HTTPS on untrusted networks. The token stays on the Home Assistant backend.",
+        "data": {
+          "url": "Bridge URL (for example http://192.168.1.10:8099)",
+          "token": "Bridge access token"
+        }
+      },
+      "device": {
+        "title": "Select and protect your radio",
+        "description": "Receive-only monitoring. RF amplifier and antenna bias power are locked OFF. Keep HackRF One input below -5 dBm; use appropriate attenuation and DC blocking for the connected equipment. Relative FFT readings cannot enforce that physical limit. Initial setup does not flash firmware. Reviewed firmware maintenance is a separate admin workflow. See https://hackrf.readthedocs.io/en/latest/hackrf_one.html#maximum-input-power",
+        "data": {
+          "name": "Name",
+          "serial": "Exact hardware serial number",
+          "acknowledge_input_safety": "I have checked RF input power and external DC protection for this board"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update bridge authentication",
+        "data": {
+          "token": "Bridge access token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot access a compatible HackRF. Check USB permissions, cable, bridge URL/logs, host tools, firmware support, other SDR apps and PortaPack HackRF mode. Reported incompatible firmware and failed self-tests block scanning.",
+      "invalid_auth": "The bridge rejected the access token.",
+      "invalid_url": "Enter an HTTP(S) URL without embedded credentials, query or fragment.",
+      "invalid_device": "Select an accessible compatible radio from the list.",
+      "safety_required": "Check the RF input and external DC protection before proceeding."
+    },
+    "abort": {
+      "already_configured": "This hardware serial number is already configured.",
+      "reauth_successful": "Bridge authentication updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Receive settings",
+        "description": "Applying settings stops monitoring. Use whole MHz endpoints, a span of 1-100 MHz inside 1-6000 MHz, and at most 20000 FFT bins. The tool rounds the upper edge to a 20 MHz tuning step; the rounded edge must also remain at or below 6000 MHz. RF amplifier and antenna power remain off.",
+        "data": {
+          "start_mhz": "Start frequency (MHz)",
+          "end_mhz": "End frequency (MHz)",
+          "bin_width": "FFT bin width (Hz)",
+          "lna_gain": "IF / LNA gain (dB, steps of 8)",
+          "vga_gain": "Baseband / VGA gain (dB, steps of 2)",
+          "scan_interval": "Scan interval (seconds)",
+          "threshold_db": "Signal threshold (relative dB)"
+        }
+      }
+    },
+    "error": {
+      "invalid_settings": "Invalid receive settings. Check frequency range and rounded upper edge, bin count, gain steps, interval (5-3600 seconds) and threshold (-150 to 0 dB)."
+    }
+  }
+}

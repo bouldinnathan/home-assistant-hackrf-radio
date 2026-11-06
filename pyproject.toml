@@ -1,0 +1,21 @@
+[project]
+name = "homeassistant-hackrf-radio"
+version = "0.2.0"
+description = "Receive-only HackRF spectrum monitoring for Home Assistant"
+requires-python = ">=3.13"
+license = "MIT"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

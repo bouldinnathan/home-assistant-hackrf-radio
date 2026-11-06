@@ -1,0 +1,26 @@
+services:
+  hackrf-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    restart: unless-stopped
+    ports:
+      - "${HACKRF_BRIDGE_BIND:-127.0.0.1}:8099:8099"
+    environment:
+      HACKRF_BRIDGE_TOKEN: "${HACKRF_BRIDGE_TOKEN:?Set a random token of at least 32 characters in .env}"
+    # Map the HackRF device only. Update after a USB reconnect if its number changes.
+    devices:
+      - "${HACKRF_USB_DEVICE:?Set the HackRF path, e.g. /dev/bus/usb/001/005}"
+    read_only: true
+    volumes:
+      - hackrf-firmware:/var/lib/hackrf
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10m
+
+volumes:
+  hackrf-firmware:

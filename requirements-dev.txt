@@ -1,0 +1,7 @@
+homeassistant==2026.7.4
+home-assistant-frontend==20260624.6
+pytest-homeassistant-custom-component==0.13.348
+pytest>=8
+pytest-asyncio>=0.24
+pytest-aiohttp>=1.0
+ruff>=0.9

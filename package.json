@@ -1,0 +1,7 @@
+{
+  "name": "hackrf-radio-panel-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test tests/frontend.test.mjs" },
+  "devDependencies": { "happy-dom": "20.8.4" }
+}
