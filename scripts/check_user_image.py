@@ -18,9 +18,11 @@ async def main():
     assert home_test.read_text() == "ready"
     home_test.unlink()
     with TemporaryDirectory() as directory:
+        program = Path(directory) / "status.py"
+        program.write_text('print(\'{"hackrf_radio_result":{"ready":true}}\', flush=True)\n')
         profile = Path(directory) / "programs.json"
         profile.write_text(json.dumps([{"id": "user_check", "name": "CI readiness check", "access": "offline", "publish_results": True,
-                                        "argv": [sys.executable, "-c", 'print(\'{"hackrf_radio_result":{"ready":true}}\',flush=True)']}]))
+                                        "argv": [sys.executable, str(program)]}]))
         radio = LocalRadio(application_directory=Path("/var/lib/hackrf/check"), profiles_path=profile)
         try:
             await radio.application_action("0" * 32, "launch", {"app_id": "user_check", "confirmed": True})
