@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hackrf_radio.const import DEFAULT_SETTINGS, DOMAIN
+from tests.ha_helpers import MockConfigEntry
 
 from .conftest import SERIAL
 

@@ -15,3 +15,5 @@ services:
       - --firmware-dir
       - /var/lib/hackrf/firmware
       - --allow-app-launch
+      - --host-lock
+      - /run/hackrf/bridge.lock

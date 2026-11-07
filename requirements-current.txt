@@ -1,0 +1,5 @@
+homeassistant==2026.11.0
+home-assistant-frontend==20261028.4
+pytest-homeassistant==2026.11.0
+pytest-aiohttp>=1.0
+ruff>=0.9

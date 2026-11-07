@@ -86,7 +86,7 @@ class BridgeClient:
                 if response.status == 404:
                     raise FirmwareUnavailable("Upgrade the USB bridge to enable firmware maintenance")
                 if response.status != 200:
-                    raise RadioError("Bridge request failed; check its logs, USB permissions and tool compatibility")
+                    raise RadioError(f"Bridge request failed (HTTP {response.status}); check its logs, USB permissions and tool compatibility")
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(65536):
                     raw.extend(chunk)
@@ -97,7 +97,7 @@ class BridgeClient:
                     raise RadioError("Bridge has an incompatible safety policy; use the matching bridge version")
                 return result
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-            raise RadioError("Cannot reach a compatible HackRF bridge; check its URL, TLS certificate and connection") from err
+            raise RadioError(f"Cannot reach a compatible HackRF bridge ({type(err).__name__}); check its URL, TLS certificate and connection") from err
 
     async def devices(self) -> list[dict]:
         result = await self._request("GET", "/v1/devices")
@@ -196,6 +196,37 @@ class BridgeClient:
         except FirmwareUnavailable:
             return {"records": [], "next_before": 0, "storage_error": "Upgrade the USB bridge to view host activity", "retention": 0}
 
+    async def setup_status(self) -> dict:
+        try:
+            result = await self._request("GET", "/v1/setup")
+            state = result.get("setup")
+        except FirmwareUnavailable:
+            # Applications/status is also admin-only on receive-token capable
+            # older bridges. Validate the role before exposing device setup.
+            state = {"applications": await self.application_status(), "tools": {}, "legacy": True}
+        if not isinstance(state, dict) or not isinstance(state.get("applications"), dict):
+            raise RadioError("Invalid setup capabilities from the USB bridge")
+        owner = state["applications"].get("owner")
+        if not isinstance(owner, dict) or not isinstance(owner.get("phase"), str) or owner["phase"] not in {"home_assistant", "external"}:
+            raise RadioError("Invalid ownership status from the USB bridge")
+        tools = state.get("tools", {})
+        installer = state["applications"].get("installer", {"phase": "idle"})
+        if (not isinstance(tools, dict) or len(tools) > 32
+                or not all(isinstance(key, str) and type(value) is bool for key, value in tools.items())
+                or not isinstance(installer, dict) or not isinstance(installer.get("phase"), str)
+                or installer["phase"] not in {"idle", "complete", "installing", "recovery_required"}):
+            raise RadioError("Invalid setup tool/maintenance status from the USB bridge")
+        if owner["phase"] == "external":
+            import re
+
+            try:
+                validate_serial(owner["serial"])
+                if not isinstance(owner.get("lease_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", owner["lease_id"]):
+                    raise ValueError
+            except (KeyError, ValueError) as err:
+                raise RadioError("External USB ownership metadata is invalid; inspect the bridge state before setup") from err
+        return state
+
     async def direct_capture(self, serial: str, settings: dict) -> dict:
         from .control import capture_settings
 
@@ -240,12 +271,24 @@ class BridgeClient:
 
 def create_client(hass, data: dict):
     if data["transport"] == "local":
+        from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+
         from .software import Applications
 
         lock = hass.data.setdefault(DOMAIN, {}).setdefault("usb_lock", asyncio.Lock())
         programs = Path(hass.config.path("hackrf_radio_programs.json"))
-        applications = hass.data[DOMAIN].setdefault("applications", Applications(lock, Path(hass.config.path(".storage", DOMAIN, "applications")), profiles_path=programs))
-        return LocalRadio(lock, Path(hass.config.path(".storage", DOMAIN, "firmware")), applications=applications)
+        if "applications" not in hass.data[DOMAIN]:
+            applications = Applications(lock, Path(hass.config.path(".storage", DOMAIN, "applications")), profiles_path=programs)
+            hass.data[DOMAIN]["applications"] = applications
+
+            async def close_host_programs(_event):
+                await applications.close()
+
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, close_host_programs)
+        applications = hass.data[DOMAIN]["applications"]
+        # Entries and discovery connections borrow the HA-host manager. Only
+        # explicit app control or host shutdown may stop its owned processes.
+        return LocalRadio(lock, Path(hass.config.path(".storage", DOMAIN, "firmware")), applications=applications, owns_applications=False)
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
     return BridgeClient(async_get_clientsession(hass), data["url"], data["token"])

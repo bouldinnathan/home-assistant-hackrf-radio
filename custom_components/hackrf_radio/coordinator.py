@@ -88,6 +88,7 @@ class HackRFCoordinator(DataUpdateCoordinator):
         self._application_lock = asyncio.Lock()
         self.activity = ActivityLog(Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "activity.sqlite")),
                                     "home_assistant", secrets=(entry.data.get("token", ""), entry.data.get("url", ""), self.serial))
+        hass.data.setdefault(DOMAIN, {}).setdefault("activity_readers", {})[entry.entry_id] = self.activity
         from homeassistant.helpers.storage import Store
 
         self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.preferences")

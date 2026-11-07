@@ -10,7 +10,7 @@ import pytest
 from custom_components.hackrf_radio.programs import load_profiles, result_data
 from custom_components.hackrf_radio.radio import LocalRadio, RadioBusy, RadioError
 
-from .conftest import INFO, SERIAL
+from .conftest import HELP, INFO, SERIAL
 
 
 def write_profile(tmp_path, code, **values):
@@ -201,4 +201,64 @@ async def test_optional_measurement_storage_failure_keeps_draining_program_outpu
     assert any(item["event"] == "app.result_rejected" for item in records)
     assert any(item["message"] == "done" for item in records)
     assert not any(item["event"] == "app.output_error" for item in records)
+    await radio.close()
+
+
+async def test_atomic_recovery_stops_only_confirmed_owner_and_rechecks_health(tmp_path):
+    profile = write_profile(tmp_path, "import time\ntime.sleep(60)\n")
+    radio = LocalRadio(application_directory=tmp_path / "apps", profiles_path=profile)
+    radio._run = AsyncMock(return_value=INFO)
+    with patch("os.geteuid", return_value=1000):
+        state = await radio.application_action(SERIAL, "launch", {"app_id": "user_decoder", "confirmed": True})
+    lease = state["owner"]["lease_id"]
+    values = {"lease_id": lease, "confirmed_closed": True, "stop_managed_program": False}
+    with pytest.raises(RadioBusy, match="Stop the managed app"):
+        await radio.application_action(SERIAL, "recover", values)
+    assert radio._applications._process.returncode is None
+    radio._run.reset_mock()
+    state = await radio.application_action(SERIAL, "recover", values | {"stop_managed_program": True})
+    assert state["owner"]["phase"] == "home_assistant"
+    assert radio._applications._process.returncode is not None
+    assert all(call.args[0] == ["hackrf_info"] for call in radio._run.call_args_list)
+    await radio.close()
+
+
+async def test_atomic_recovery_rejects_a_lease_changed_while_waiting_for_the_control_lock(tmp_path):
+    radio = LocalRadio(application_directory=tmp_path / "apps")
+    radio._run = AsyncMock(return_value=INFO)
+    state = await radio.application_action(SERIAL, "handoff", {"app_id": "external", "confirmed": True})
+    manager = radio._applications
+    radio._run.reset_mock()
+    await manager._launch_lock.acquire()
+    request = asyncio.create_task(radio.application_action(SERIAL, "recover", {"lease_id": state["owner"]["lease_id"], "confirmed_closed": True, "stop_managed_program": True}))
+    await asyncio.sleep(0)
+    await manager._save("owner.json", state["owner"] | {"lease_id": "f" * 32})
+    manager._launch_lock.release()
+    with pytest.raises(RadioBusy, match="changed"):
+        await request
+    radio._run.assert_not_awaited()
+    assert (await radio.application_status())["owner"]["phase"] == "external"
+    await radio.close()
+
+
+async def test_profile_launch_preflight_reports_root_and_missing_working_directory_without_usb(tmp_path):
+    profile = write_profile(tmp_path, "pass\n", cwd=str(tmp_path / "missing"))
+    radio = LocalRadio(application_directory=tmp_path / "apps", profiles_path=profile)
+    radio._run = AsyncMock(return_value=INFO)
+    with patch("os.geteuid", return_value=0):
+        app = next(app for app in (await radio.application_status())["catalog"] if app["id"] == "user_decoder")
+        assert not app["launch_enabled"] and "unprivileged" in app["launch_reason"]
+    with patch("os.geteuid", return_value=1000), pytest.raises(RadioError, match="working directory"):
+        await radio.application_action(SERIAL, "launch", {"app_id": "user_decoder", "confirmed": True})
+    radio._run.assert_not_awaited()
+    assert (await radio.application_status())["owner"]["phase"] == "home_assistant"
+    await radio.close()
+
+
+async def test_explicit_missing_profiles_report_error_but_leave_basic_radio_available(tmp_path):
+    radio = LocalRadio(application_directory=tmp_path / "apps", profiles_path=tmp_path / "absent.json")
+    assert (await radio.application_status())["profile_error"]
+    radio._run = AsyncMock(side_effect=lambda args, **kwargs: HELP if args[-1] == "-h" else INFO)
+    assert (await radio.application_status())["owner"]["phase"] == "home_assistant"
+    assert (await radio.devices())[0]["serial"] == SERIAL
     await radio.close()

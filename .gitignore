@@ -10,3 +10,7 @@ firmware-data/
 applications-data/
 /applications/
 /.storage/
+/bridge-data/
+/bridge-programs/
+.env.*
+!.env.example

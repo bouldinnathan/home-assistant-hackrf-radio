@@ -27,14 +27,19 @@ async def async_read_activity(hass, entry_id, source="home_assistant", **filters
         from .activity import ActivityLog
 
         readers = hass.data.setdefault(DOMAIN, {}).setdefault("activity_readers", {})
-        journal = readers.setdefault(entry.entry_id, ActivityLog(Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "activity.sqlite")), "home_assistant"))
+        runtime = getattr(entry, "runtime_data", None)
+        journal = getattr(runtime, "activity", None)
+        if journal is not None:
+            readers[entry.entry_id] = journal
+        else:
+            journal = readers.setdefault(entry.entry_id, ActivityLog(Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "activity.sqlite")), "home_assistant"))
         return await journal.read(**filters)
     return await coordinator_for(hass, entry_id).async_activity(source=source, **filters)
 
 
 @callback
 def async_register_commands(hass):
-    for handler in (list_radios, get_radio, control_radio, firmware_radio, applications_radio, capture_radio, activity_radio, preset_radio):
+    for handler in (list_radios, get_radio, control_radio, firmware_radio, applications_radio, capture_radio, activity_radio, preset_radio, setup_activity):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -166,3 +171,14 @@ async def preset_radio(hass, connection, msg):
         connection.send_result(msg["id"], await coordinator_for(hass, msg["entry_id"]).async_preset(**values))
     except (RadioError, ValueError) as err:
         connection.send_error(msg["id"], "preset_error", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hackrf_radio/setup_activity"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def setup_activity(hass, connection, msg):
+    from .activity import ActivityLog
+
+    readers = hass.data.setdefault(DOMAIN, {}).setdefault("activity_readers", {})
+    journal = readers.setdefault("setup", ActivityLog(Path(hass.config.path(".storage", DOMAIN, "setup", "activity.sqlite")), "setup"))
+    connection.send_result(msg["id"], await journal.read(limit=50))

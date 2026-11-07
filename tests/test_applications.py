@@ -274,9 +274,8 @@ async def test_bridge_client_direct_capture_and_app_round_trip(aiohttp_client, r
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_ha_capture_download_and_external_pause(hass, hass_ws_client, hass_client, radio):
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
     from custom_components.hackrf_radio.const import DEFAULT_SETTINGS, DOMAIN
+    from tests.ha_helpers import MockConfigEntry
 
     entry = MockConfigEntry(domain=DOMAIN, title="App bench", unique_id=SERIAL,
                             data={"transport": "local", "serial": SERIAL}, options=DEFAULT_SETTINGS)

@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.core import Context
 from homeassistant.exceptions import HomeAssistantError, Unauthorized
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hackrf_radio.const import DEFAULT_SETTINGS, DOMAIN
 from custom_components.hackrf_radio.radio import RadioError
+from tests.ha_helpers import MockConfigEntry
 
 from .conftest import SERIAL
 

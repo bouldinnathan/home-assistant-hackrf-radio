@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import Unauthorized
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hackrf_radio import async_setup_entry, async_unload_entry
 from custom_components.hackrf_radio.const import DEFAULT_SETTINGS, DOMAIN
@@ -21,6 +20,7 @@ from custom_components.hackrf_radio.websocket_api import (
     firmware_radio,
     list_radios,
 )
+from tests.ha_helpers import MockConfigEntry
 
 from .conftest import SERIAL
 
@@ -46,7 +46,7 @@ def client(device, spectrum):
 
 
 async def test_real_config_flow_requires_safety_and_prevents_duplicate_serial(hass, device):
-    client = AsyncMock(devices=AsyncMock(return_value=[device]))
+    client = AsyncMock(devices=AsyncMock(return_value=[device]), setup_status=AsyncMock(return_value={"applications": {"owner": {"phase": "home_assistant"}}, "tools": {}}))
     with patch("custom_components.hackrf_radio.config_flow.create_client", return_value=client), \
             patch("custom_components.hackrf_radio.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
@@ -107,7 +107,7 @@ async def test_real_options_flow_rejects_bad_gain_then_saves(hass, entry):
 async def test_bridge_config_flow_handles_auth_failure(hass):
     from custom_components.hackrf_radio.radio import AuthenticationError
 
-    client = AsyncMock(devices=AsyncMock(side_effect=AuthenticationError("Invalid token")))
+    client = AsyncMock(setup_status=AsyncMock(side_effect=AuthenticationError("Invalid token")))
     with patch("custom_components.hackrf_radio.config_flow.create_client", return_value=client):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "bridge"})

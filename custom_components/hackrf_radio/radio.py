@@ -175,7 +175,7 @@ class LocalRadio:
     def __init__(self, lock: asyncio.Lock | None = None, firmware_directory: Path | None = None,
                  applications=None, application_directory: Path | None = None,
                  allow_install: bool = False, allow_launch: bool = False, soapy_bind: str = "127.0.0.1",
-                 profiles_path: Path | None = None) -> None:
+                 profiles_path: Path | None = None, owns_applications: bool = True) -> None:
         from .activity import ActivityLog
 
         self._lock = lock if lock is not None else asyncio.Lock()
@@ -184,6 +184,7 @@ class LocalRadio:
         self._capabilities_checked = False
         self._firmware = None
         self._applications = applications
+        self._owns_applications = owns_applications
         log_directory = application_directory or (firmware_directory.parent / "applications" if firmware_directory else None)
         self.activity = applications.activity if applications else ActivityLog((log_directory / "activity.sqlite") if log_directory else None)
         if firmware_directory is not None:
@@ -195,7 +196,7 @@ class LocalRadio:
 
             directory = application_directory if application_directory is not None else firmware_directory.parent / "applications"
             self._applications = Applications(self._lock, directory, allow_install=allow_install, allow_launch=allow_launch,
-                                              soapy_bind=soapy_bind, profiles_path=profiles_path, activity=self.activity)
+                                              soapy_bind=soapy_bind, profiles_path=profiles_path, activity=self.activity, profiles_required=profiles_path is not None)
 
     async def _assert_managed_access(self) -> None:
         if self._applications:
@@ -344,6 +345,13 @@ class LocalRadio:
     async def activity_read(self, **filters) -> dict:
         return await self.activity.read(**filters)
 
+    async def setup_status(self) -> dict:
+        import shutil
+
+        tools = await asyncio.to_thread(lambda: {name: bool(shutil.which(name)) for name in
+                                                ("hackrf_info", "hackrf_sweep", "hackrf_transfer", "hackrf_spiflash")})
+        return {"applications": await self.application_status(), "tools": tools, "atomic_recovery": True}
+
     async def application_status(self) -> dict:
         if not self._applications:
             from .software import CATALOG
@@ -362,6 +370,8 @@ class LocalRadio:
             return await manager.acquire(self, serial, values["app_id"], values["confirmed"])
         if action == "release":
             return await manager.release(self, serial, values["confirmed_closed"])
+        if action == "recover":
+            return await manager.recover(self, serial, values["lease_id"], values["confirmed_closed"], values["stop_managed_program"])
         if action == "launch":
             return await manager.launch(self, serial, values["app_id"], values["confirmed"])
         if action == "stop":
@@ -379,5 +389,5 @@ class LocalRadio:
         await self.stop()
         if self._firmware:
             await self._firmware.wait()
-        if self._applications:
+        if self._applications and self._owns_applications:
             await self._applications.close()

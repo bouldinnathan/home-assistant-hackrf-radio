@@ -1,0 +1,29 @@
+# First run: python3 scripts/setup_bridge.py --programs --device /dev/bus/usb/BBB/DDD --bind YOUR_LAN_IP
+# docker compose -f compose.bridge.yaml -f compose.user.yaml up -d --build
+services:
+  hackrf-bridge:
+    build:
+      target: bridge-user
+      args:
+        HACKRF_UID: "${HACKRF_UID:?Run the setup helper as your normal account}"
+        HACKRF_GID: "${HACKRF_GID:?Run the setup helper as your normal account}"
+        HACKRF_APPS: "${HACKRF_APPS:-soapy_remote,inspectrum}"
+    group_add:
+      - "${HACKRF_USB_GID:?Set the actual USB node group with the setup helper}"
+    volumes:
+      - "${HACKRF_DATA_DIR:?Set an owned persistent directory}:/var/lib/hackrf"
+      - "${HACKRF_DATA_DIR:?Set an owned persistent directory}/home:/home/radio"
+      - "${HACKRF_PROGRAMS_DIR:?Set your program directory}:/programs:ro"
+    command:
+      - python
+      - -m
+      - custom_components.hackrf_radio.bridge
+      - --host
+      - 0.0.0.0
+      - --firmware-dir
+      - /var/lib/hackrf/firmware
+      - --custom-programs
+      - /programs/programs.json
+      - --allow-app-launch
+      - --host-lock
+      - /run/hackrf/bridge.lock

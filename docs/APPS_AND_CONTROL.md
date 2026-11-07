@@ -161,3 +161,5 @@ Admin application actions are under `POST /v1/applications/{action}`. Status tak
 ## Home Assistant programs, automations and logs
 
 Version 0.4 adds USB-host configured custom launch profiles, optional decoder measurements, native HA actions, saved receive profiles and persistent activity history. See [the Home Assistant workspace guide](HOME_ASSISTANT_WORKSPACE.md). Fixed reviewed catalog recipes remain available; custom commands require an operator-controlled host file and an unprivileged execution account.
+
+Version 0.5 adds [non-root Docker setup, atomic ownership recovery, URL reconfiguration and protected error history](FIRST_RUN.md). Operator-supplied profiles remain separate from fixed APT installation recipes.

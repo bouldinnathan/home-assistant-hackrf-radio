@@ -319,9 +319,8 @@ async def test_authenticated_bridge_firmware_end_to_end(aiohttp_client, rig):
 async def test_real_ha_firmware_panel_workflow(hass, hass_ws_client, rig):
     from unittest.mock import patch
 
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
     from custom_components.hackrf_radio.const import DEFAULT_SETTINGS, DOMAIN
+    from tests.ha_helpers import MockConfigEntry
 
     radio, state, _ = rig
     entry = MockConfigEntry(domain=DOMAIN, title="Firmware bench", unique_id=SERIAL,

@@ -22,22 +22,30 @@ jobs:
             ha: "2026.7.4"
             frontend: "20260624.6"
             plugin: "0.13.348"
+          - python: "3.14"
+            ha: "2026.11.0"
+            frontend: "20261028.4"
+            official: true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: >-
+      - if: ${{ !matrix.official }}
+        run: >-
           python -m pip install --pre
           homeassistant==${{ matrix.ha }}
           home-assistant-frontend==${{ matrix.frontend }}
           pytest-homeassistant-custom-component==${{ matrix.plugin }}
           pytest-aiohttp ruff
+      - if: matrix.official
+        run: python -m pip install -r requirements-current.txt
       - if: matrix.ha == '2025.1.4'
         run: python -m pip install pycares==4.5.0
       - run: ruff check .
       - run: python -m compileall -q custom_components tests
-      - run: pytest
+      - run: python -c "from homeassistant.const import __version__; assert __version__ == '${{ matrix.ha }}'"
+      - run: python scripts/run_tests.py
       - run: python scripts/build_release.py
 
   frontend:
@@ -67,6 +75,30 @@ jobs:
         run: >-
           docker run --rm hackrf-tools:test python -c
           "import shutil,pathlib; assert all(shutil.which(name) for name in ['SoapySDRServer','gqrx','CubicSDR','gnuradio-companion','inspectrum']); assert pathlib.Path('/etc/systemd/system/soapyremote-server.service').readlink() == pathlib.Path('/dev/null')"
+      - name: Build the unprivileged program image
+        run: >-
+          docker build -f Dockerfile.bridge --target bridge-user
+          --build-arg HACKRF_APPS=soapy_remote,gqrx,cubicsdr,gnuradio,inspectrum
+          -t hackrf-user:test .
+      - name: Test unprivileged code, results and logs with a read-only root filesystem
+        run: >-
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true
+          --tmpfs /tmp:rw,nosuid,noexec,size=32m,mode=1777
+          --mount type=volume,target=/var/lib/hackrf
+          --mount type=volume,target=/home/radio
+          --mount type=volume,target=/run/hackrf
+          -v "$PWD/scripts:/checks:ro" -e PYTHONPATH=/app hackrf-user:test
+          python /checks/check_user_image.py
+      - name: Validate the non-root Compose overlay
+        env:
+          HACKRF_BRIDGE_TOKEN: "test-administrator-token-at-least-thirty-two-characters"
+          HACKRF_USB_DEVICE: "/dev/null"
+          HACKRF_UID: "1000"
+          HACKRF_GID: "1000"
+          HACKRF_USB_GID: "1000"
+          HACKRF_DATA_DIR: "/tmp/hackrf-data"
+          HACKRF_PROGRAMS_DIR: "/tmp/hackrf-programs"
+        run: docker compose -f compose.bridge.yaml -f compose.user.yaml config --quiet
 
   hassfest:
     runs-on: ubuntu-latest

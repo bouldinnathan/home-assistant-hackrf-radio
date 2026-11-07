@@ -9,12 +9,14 @@ from pathlib import Path
 from .radio import RadioError
 
 
-def load_profiles(path: Path | None) -> dict:
+def load_profiles(path: Path | None, required: bool = False) -> dict:
     if path is None:
         return {}
-    if not path.exists():
-        return {}
     try:
+        if not path.exists():
+            if required:
+                raise FileNotFoundError
+            return {}
         if path.stat().st_size > 65536:
             raise ValueError
         data = json.loads(path.read_text())

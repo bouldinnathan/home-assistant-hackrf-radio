@@ -68,7 +68,7 @@ class HackRFRadioPanel extends HTMLElement {
       <main>
         <div class="top"><div><div class="eyebrow">RADIO WORKSPACE</div><h2>Explore the spectrum</h2><p>Receive sweeps, signal levels, and activity over time.</p></div><select id="radio" aria-label="Select radio"></select></div>
         <div id="error" class="error" role="alert" hidden></div>
-        <div id="empty" class="card empty" hidden><h3>Add your HackRF</h3><p>Open Settings → Devices & services → Add integration → HackRF Radio.</p><p>Use the bridge for Home Assistant OS, or local USB where the HackRF tools are installed.</p><a href="/config/integrations/dashboard/add?domain=hackrf_radio">Set up HackRF Radio</a></div>
+        <div id="empty" class="card empty" hidden><h3>Add your HackRF</h3><p>Open Settings → Devices & services → Add integration → HackRF Radio.</p><p>Use the bridge for Home Assistant OS, or local USB where the HackRF tools are installed.</p><a href="/config/integrations/dashboard/add?domain=hackrf_radio">Set up HackRF Radio</a><div class="actions"><button class="action" id="setup-logs-empty">Read setup diagnostics</button></div></div><div class="card" id="setup-log" hidden><h3>Recent setup diagnostics</h3><pre id="setup-log-records" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div>
         <section id="workspace">
           <nav class="view-tabs" aria-label="Radio workspace"><button class="action" id="show-spectrum" aria-selected="true">Spectrum & firmware</button><button class="action" id="show-apps" aria-selected="false">Apps & your code</button><button class="action" id="show-setup" aria-selected="false">Connecting & integrations</button><button class="action" id="show-logs" aria-selected="false">Activity & logs</button></nav>
           <div id="spectrum-view">
@@ -125,7 +125,7 @@ class HackRFRadioPanel extends HTMLElement {
             <div class="card" style="margin-bottom:16px"><h3>Your code and results</h3><p>USB-host program profiles appear in the application selector below. Start and stop your programs here or through Home Assistant automations. Programs can optionally publish measurements to the Custom result sensor and the hackrf_radio_result event.</p><pre id="program-status"></pre><pre class="integration-result" id="program-result">No custom measurements received.</pre><button class="action" id="program-logs">View program logs</button></div>
             <div class="app-tools">
               <div class="card"><h3>External app control</h3>
-                <label>Application<select id="external-app"></select></label>
+                <label>Application<select id="external-app"></select></label><p class="help" id="launch-reason"></p>
                 <label class="check"><input id="external-confirm" type="checkbox">Other SDR apps are closed. I understand this app controls its own RF settings, including any transmit, amplifier or bias features.</label>
                 <div class="actions"><button class="action" id="app-handoff">Hand off USB</button><button class="action" id="app-launch">Launch on USB host</button><button class="action" id="app-stop">Stop managed app</button></div>
                 <label class="check"><input id="external-closed" type="checkbox">I have closed the external app and released its USB connections.</label>
@@ -156,7 +156,7 @@ class HackRFRadioPanel extends HTMLElement {
             <div class="software-grid" id="software-catalog"></div>
           </section>
           <section id="setup-view" hidden>
-            <div class="card"><h3>Connection checklist</h3><pre id="connection-checks"></pre><ol><li>Connect a HackRF using a USB data cable. On a Mayhem PortaPack, select HackRF from the device menu.</li><li>For HA OS, run the Linux USB bridge. HACS does not install native USB tools into HA OS.</li><li>Configure the bridge token, actual USB device path and LAN bind address in .env, then run Docker Compose.</li><li>Add HackRF Radio in Settings → Devices & services. Choose USB bridge, enter its HTTP(S) URL and administrative token, then select the exact serial.</li><li>Choose Sweep now first. Monitoring stays off after setup, reconnection or restart until explicitly started.</li></ol><p>Local USB requires compatible tools and USB permissions inside the HA runtime. Close competing SDR apps. If a reset changes the Docker USB device number, update the mapping after firmware readback has finished.</p><a href="https://github.com/bouldinnathan/home-assistant-hackrf-radio#connecting-the-usb-device" target="_blank" rel="noopener noreferrer">Complete bridge and connection instructions ↗</a></div>
+            <div class="card"><h3>Connection checklist</h3><pre id="connection-checks"></pre><button class="action" id="setup-logs">Read setup diagnostics</button><ol><li>Connect a HackRF using a USB data cable. On a Mayhem PortaPack, select HackRF from the device menu.</li><li>For HA OS, run the Linux USB bridge. HACS does not install native USB tools into HA OS.</li><li>Configure the bridge token, actual USB device path and LAN bind address in .env, then run Docker Compose.</li><li>Add HackRF Radio in Settings → Devices & services. Choose USB bridge, enter its HTTP(S) URL and administrative token, then select the exact serial.</li><li>Choose Sweep now first. Monitoring stays off after setup, reconnection or restart until explicitly started.</li></ol><p>Local USB requires compatible tools and USB permissions inside the HA runtime. Close competing SDR apps. If a reset changes the Docker USB device number, update the mapping after firmware readback has finished.</p><a href="https://github.com/bouldinnathan/home-assistant-hackrf-radio#connecting-the-usb-device" target="_blank" rel="noopener noreferrer">Complete bridge and connection instructions ↗</a></div>
             <div class="card"><h3>Run your own code or system</h3><p>On a native USB-host bridge, pass --custom-programs /absolute/path/programs.json. In local USB mode, use /config/hackrf_radio_programs.json. Profile files are controlled by the host operator; restart the bridge after initial configuration. No Home Assistant package is needed on a remote bridge host.</p><pre id="profile-example"></pre><p>Use access: "usb" for a decoder that directly opens the radio; HA hands over USB before launch. Use access: "offline" for file analysis or an HTTP API client, which must avoid direct USB access. Programs receive HACKRF_SERIAL and fixed arguments. Credentials are removed from inherited environment variables; configure any required receive credential in a protected file read by your code.</p><p>With publish_results enabled, print one JSON object per line: {"hackrf_radio_result":{"temperature_c":21.5,"signal":"detected"}}. Results become HA sensor attributes and hackrf_radio_result events. Leave this option off for standalone processing. External programs control their own RF settings.</p></div>
             <div class="card"><h3>Automations and optional integrations</h3><p>Use Settings → Automations & scenes → Create automation → Add action and search HackRF Radio. Actions support sweeps, I/Q capture, monitoring, configuration, saved presets, app launch/stop, USB handoff/return, custom results and log queries. Choose a time trigger to schedule a scan or recording. Monitoring must first be explicitly armed; an automation that calls the monitoring action is an explicit start.</p><p>Use the hackrf_radio_result event with Node-RED, or forward selected measurements using Home Assistant's MQTT, webhook or notification actions. These adapters are optional and use your existing HA integrations. Do not automatically restart programs or resume monitoring after a failure.</p><pre id="automation-example"></pre><p>The direct receive HTTP API also works without HA. Give scripts the separate receive token. Live SDR streaming uses optional SoapyRemote, which needs its own trusted VPN/firewall configuration.</p></div>
             <div class="card"><h3>Saved receive profiles</h3><label>Profile name<input id="saved-preset-name" maxlength="60" placeholder="Garden sensors"></label><div class="actions"><button class="action" id="preset-save">Save current settings</button></div><label>Saved profile<select id="saved-preset"></select></label><div class="actions"><button class="action" id="preset-apply">Apply saved profile</button><button class="action" id="preset-delete">Delete saved profile</button></div><p>Applying stops monitoring and clears the old spectrum. It does not start the radio.</p></div>
@@ -199,6 +199,7 @@ class HackRFRadioPanel extends HTMLElement {
       this._applications(action, values);
     };
     for (const id of ["external-app", "external-confirm", "external-closed", "packages-confirm"]) root.querySelector(`#${id}`).onchange = () => this._buttons();
+    for (const id of ["setup-logs", "setup-logs-empty"]) root.querySelector(`#${id}`).onclick = () => this._setupActivity();
     root.querySelector("#program-logs").onclick = () => {
       root.querySelector("#log-source").value = "usb_host";
       root.querySelector("#show-logs").click();
@@ -324,6 +325,7 @@ class HackRFRadioPanel extends HTMLElement {
     root.querySelector("#firmware-install").disabled = Boolean(!confirmed || busy);
     root.querySelector("#firmware-verify").disabled = Boolean(this._fwActing || firmware.active || external || packagesBusy || this._appActing);
     const app = (apps.catalog || []).find((entry) => entry.id === root.querySelector("#external-app").value);
+    root.querySelector("#launch-reason").textContent = app?.launch_reason || "";
     root.querySelector("#app-handoff").disabled = busy || apps.available === false || !app || !root.querySelector("#external-confirm").checked;
     root.querySelector("#app-launch").disabled = root.querySelector("#app-handoff").disabled || apps.running || !(app?.launch_enabled ?? apps.launch_enabled) || !app?.installed || !app?.launch?.length;
     root.querySelector("#app-stop").disabled = !apps.running || this._appActing;
@@ -505,7 +507,7 @@ class HackRFRadioPanel extends HTMLElement {
     root.querySelector("#installer-status").textContent = `${apps.installer?.phase || "idle"} · ${apps.installer?.message || (apps.install_enabled ? "Managed package installation is enabled on this USB host." : "Managed install is disabled. Use the reviewed recipe on a Debian/Ubuntu USB host, or an upstream installer on your computer.")}`;
     root.querySelector("#soapy-connection").textContent = `SoapyRemote client device args (native USB-host bridge):\ndriver=remote,remote=${apps.soapy_bind || "127.0.0.1"}:55132,remote:driver=hackrf,remote:serial=${data.serial},remote:prot=tcp\nLoopback is the default. Remote streaming needs an explicitly configured private bind IP, trusted VPN/firewall, and access to negotiated stream ports. A single-port SSH tunnel is insufficient.`;
     const running = apps.running ? `Running: ${apps.running_app || "managed program"}` : "No managed program is running.";
-    root.querySelector("#program-status").textContent = `${running}${apps.last_exit ? `\nLast exit: ${apps.last_exit.app_id}, code ${apps.last_exit.returncode}` : ""}`;
+    root.querySelector("#program-status").textContent = `${apps.profile_error ? `Custom programs disabled: ${apps.profile_error}\n` : ""}${running}${apps.last_exit ? `\nLast exit: ${apps.last_exit.app_id}, code ${apps.last_exit.returncode}` : ""}`;
     root.querySelector("#program-result").textContent = data.result ? `${data.result.source} · ${data.result.timestamp}\n${JSON.stringify(data.result.data, null, 2)}` : "No custom measurements received.";
     const capture = data.capture;
     root.querySelector("#capture-info").textContent = capture ? `${capture.byte_count} bytes · ${capture.format} · ${capture.settings.sample_rate / 1e6} Msps\nCenter ${capture.settings.frequency_hz} Hz · ${capture.captured_at}\nSHA256: ${capture.sha256}` : "No capture yet. The latest four completed captures are retained on the USB host.";
@@ -546,6 +548,16 @@ class HackRFRadioPanel extends HTMLElement {
     this._updateApps(data);
     if ((data.applications?.owner?.phase || "home_assistant") !== "home_assistant") set("status", "External app");
     this._buttons(); this._draw();
+  }
+
+  async _setupActivity() {
+    const root = this.shadowRoot, generation = this._generation;
+    root.querySelector("#setup-log").hidden = false;
+    try {
+      const data = await this._hass.callWS({ type: "hackrf_radio/setup_activity" });
+      if (generation !== this._generation) return;
+      root.querySelector("#setup-log-records").textContent = data.storage_error || (data.records || []).map((record) => `${record.timestamp} · ${record.level} · ${record.message}`).join("\n") || "No failed setup attempts recorded. Check the bridge's console logs if it has not started.";
+    } catch (error) { if (generation === this._generation) root.querySelector("#setup-log-records").textContent = error.message || "Cannot read setup diagnostics"; }
   }
 
   async _savedPreset(action) {
@@ -594,7 +606,7 @@ class HackRFRadioPanel extends HTMLElement {
     const records = [], filters = this._logFilters();
     let before = 0, storageError = null;
     try {
-      for (let page = 0; page < 32 && records.length < 2000; page++) {
+      for (let page = 0; page < 32 && records.length < 2500; page++) {
         const data = await this._hass.callWS({ type: "hackrf_radio/activity", entry_id: entry, ...filters, before, limit: 500 });
         if (entry !== this._selected || generation !== this._generation) return;
         storageError = data.storage_error || storageError;

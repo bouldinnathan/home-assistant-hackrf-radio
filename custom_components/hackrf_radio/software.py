@@ -96,7 +96,8 @@ CATALOG = {app.id: app for app in (
 
 ACTION_FIELDS = {"status": set(), "handoff": {"app_id", "confirmed"}, "release": {"confirmed_closed"},
                  "launch": {"app_id", "confirmed"}, "stop": set(), "link": {"app_id", "url"},
-                 "prepare_install": {"apps"}, "install": {"plan_id", "confirmed"}}
+                 "prepare_install": {"apps"}, "install": {"plan_id", "confirmed"},
+                 "recover": {"lease_id", "confirmed_closed", "stop_managed_program"}}
 
 
 def validate_action(action: str, values: dict) -> None:
@@ -229,7 +230,8 @@ async def _run_packages(commands: list[list[str]], environment: dict, activity: 
 
 class Applications:
     def __init__(self, lock: asyncio.Lock, directory: Path, *, allow_install: bool = False, allow_launch: bool = False,
-                 soapy_bind: str = "127.0.0.1", profiles_path: Path | None = None, activity: ActivityLog | None = None) -> None:
+                 soapy_bind: str = "127.0.0.1", profiles_path: Path | None = None, activity: ActivityLog | None = None,
+                 profiles_required: bool = False) -> None:
         self.lock = lock
         self.directory = Path(directory)
         self.allow_install = allow_install
@@ -248,9 +250,18 @@ class Applications:
         self._last_exit = None
         self._result = None
         self._stop_job = None
+        self._profile_error = None
+        self.profiles_required = profiles_required
+        self._recovery_job = None
 
     async def _catalog(self):
-        self._profiles = await asyncio.to_thread(load_profiles, self.profiles_path)
+        try:
+            self._profiles = await asyncio.to_thread(load_profiles, self.profiles_path, self.profiles_required)
+            self._profile_error = None
+        except RadioError as err:
+            self._profiles = {}
+            self._profile_error = str(err)
+            await self.activity.record("app.profiles_invalid", self._profile_error, level="warning", deduplicate=True)
         return CATALOG | {identifier: Software(identifier, profile["name"], "Your programs", profile["description"],
                                                "", "", ("USB host",), (), (profile["argv"][0],), ("host-configured",), profile["desktop"])
                           for identifier, profile in self._profiles.items()}
@@ -258,6 +269,8 @@ class Applications:
     async def _software_for(self, app_id):
         catalog = await self._catalog()
         if not isinstance(app_id, str) or app_id not in catalog:
+            if isinstance(app_id, str) and app_id.startswith("user_") and self._profile_error:
+                raise RadioError(self._profile_error)
             raise RadioError("Choose a reviewed app or a program configured on the USB host")
         return catalog[app_id]
 
@@ -304,17 +317,26 @@ class Applications:
             await self.activity.record("app.result_unreadable", "Saved custom measurements are unreadable; inspect application storage", level="warning", deduplicate=True)
         software = await self._catalog()
         def catalog():
-            return [asdict(app) | {"installed": bool(app.executables) and all(shutil.which(name) for name in app.executables),
-                                   "web_url": links.get(app.id, ""), "custom": app.id in self._profiles,
-                                   "access": self._profiles.get(app.id, {}).get("access", "usb"),
-                                   "launch_enabled": self.allow_launch or app.id in self._profiles}
-                    for app in software.values()]
+            entries = []
+            for app in software.values():
+                custom = app.id in self._profiles
+                installed = bool(app.executables) and all(shutil.which(name) for name in app.executables)
+                reason = ("Use this application's own launcher" if not app.launch else
+                          "Program launch is not enabled on this USB host" if not (self.allow_launch or custom) else
+                          "Install the executable on the USB host first" if not installed else
+                          "Custom programs require an unprivileged USB-host account" if custom and os.geteuid() == 0 else
+                          "Desktop launch requires an unprivileged graphical host session" if app.desktop and (os.geteuid() == 0 or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))) else "")
+                entries.append(asdict(app) | {"installed": installed, "web_url": links.get(app.id, ""), "custom": custom,
+                                             "access": self._profiles.get(app.id, {}).get("access", "usb"),
+                                             "launch_enabled": not bool(reason), "launch_reason": reason})
+            return entries
         return {"owner": owner, "installer": install, "catalog": await asyncio.to_thread(catalog),
                 "install_enabled": install_available(self.allow_install),
                 "launch_enabled": self.allow_launch or bool(self._profiles),
                 "soapy_bind": self.soapy_bind,
                 "running": self._process is not None and self._process.returncode is None,
                 "running_app": self._running_app, "last_exit": self._last_exit,
+                "profile_error": self._profile_error,
                 "result": result,
                 "plan": self._plan.copy() if self._plan else None}
 
@@ -372,6 +394,33 @@ class Applications:
         await self.activity.record("app.release", "USB control returned after device identity and health check")
         return await self.status()
 
+    async def recover(self, radio, serial, lease_id, confirmed_closed, stop_managed_program):
+        serial = validate_serial(serial)
+        if confirmed_closed is not True or type(stop_managed_program) is not bool or not isinstance(lease_id, str):
+            raise RadioError("Confirm the reviewed ownership and closed external USB connections")
+        if self._recovery_job and not self._recovery_job.done():
+            raise RadioBusy("USB ownership recovery is already in progress")
+
+        async def recover_owned():
+            try:
+                async with self._launch_lock:
+                    current = await self._read("owner.json", {"phase": "home_assistant"})
+                    if current.get("phase") != "external" or current.get("serial") != serial or current.get("lease_id") != lease_id:
+                        raise RadioBusy("USB ownership changed; review the current owner again")
+                    if stop_managed_program:
+                        await self._stop()
+                    return await self._release(radio, serial, True)
+            except Exception as err:
+                await self.activity.record("app.recovery_failed", str(err) if isinstance(err, RadioError) else "USB recovery did not finish; inspect current ownership and host storage",
+                                           level="warning", details={"exception": type(err).__name__})
+                raise
+
+        self._recovery_job = asyncio.create_task(recover_owned())
+        # Retain cleanup after a disconnected setup browser, and consume a
+        # background failure even if that browser is no longer awaiting it.
+        self._recovery_job.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+        return await asyncio.shield(self._recovery_job)
+
     async def launch(self, radio, serial: str, app_id: str, confirmed: bool) -> dict:
         async with self._launch_lock:
             return await self._launch(radio, serial, app_id, confirmed)
@@ -393,6 +442,8 @@ class Applications:
             raise RadioError("Install the application on the USB host before launching it")
         if app.desktop and (os.geteuid() == 0 or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))):
             raise RadioError("Desktop apps need an unprivileged USB-host desktop session; HA OS/headless containers do not provide one")
+        if profile and profile["cwd"] is not None and not await asyncio.to_thread(Path(profile["cwd"]).is_dir):
+            raise RadioError("The configured program working directory is absent; USB ownership was not changed")
         if confirmed is not True:
             raise RadioError("Confirm the configured program and its RF settings before launch")
         if not profile or profile["access"] == "usb":
@@ -612,6 +663,13 @@ class Applications:
                 self.lock.release()
 
     async def close(self) -> None:
+        while self._recovery_job and not self._recovery_job.done():
+            try:
+                await asyncio.shield(self._recovery_job)
+            except asyncio.CancelledError:
+                continue
+            except RadioError:
+                break
         while self._install_job:
             try:
                 await asyncio.shield(self._install_job)

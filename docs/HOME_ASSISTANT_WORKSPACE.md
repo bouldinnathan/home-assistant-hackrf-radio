@@ -71,14 +71,15 @@ Set `HACKRF_BRIDGE_TOKEN` in this service's environment. Start from the
 repository root or an environment containing the integration package. A
 profile file explicitly enables its custom launches; `--allow-app-launch`
 separately enables the built-in software launch recipes. The default Docker
-image runs as root and deliberately cannot launch user code. Use a native
+image runs as root and deliberately cannot launch user code. For a ready-made
+unprivileged image and setup helper, follow [the first-run guide](FIRST_RUN.md). Use a native
 unprivileged bridge or configure an unprivileged container with the required
 USB permissions, program files and persistent storage.
 
 For **local USB**, place profiles in `hackrf_radio_programs.json` in HA's
 configuration directory. HA must run unprivileged. Profiles are re-read when
 the catalog is refreshed. A missing file disables custom profiles; an invalid
-file produces an actionable error rather than partially loading commands.
+file disables custom profiles and reports an error; basic radio startup and process cleanup remain available.
 
 In **Apps & your code**, select your profile, acknowledge its settings and
 choose **Launch on USB host**. Stop it with **Stop managed app**. Custom IDs
@@ -202,7 +203,7 @@ JSON. Auto-refresh runs while the view is open; loading older records pauses it.
 HA history remains readable for an unloaded entry, including failed setup.
 Remote host history requires a reachable bridge with the new log endpoint.
 
-Each source retains **2,000 records** in an SQLite database, with an **8,192-page
+Each source retains **2,000 recent records plus up to 500 protected warnings/errors** in an SQLite database, with an **8,192-page
 storage ceiling** (normally 32 MiB). Transactions use FULL synchronous commits
 and transactional retention. Files are mode 0600; each write/read runs off the
 HA event loop. Records contain UTC timestamps, source, severity, event, message
@@ -231,3 +232,5 @@ a stable logger warning. They never erase the database or interrupt a firmware
 write. Receiving and firmware safety journals remain independent. Inspect the
 host before repairing history; retain a corrupt database for diagnosis. Keep
 the HA config and bridge persistent volume in your normal backup plan.
+
+Local USB clients now borrow a host-lifetime application manager: discovery, entry reload and entry unload do not stop another program. Explicit app Stop and HA-host shutdown perform managed-process cleanup. Native bridge processes use an advisory host lease; the supplied Docker profiles share their lease volume. See [0.5 setup and recovery](FIRST_RUN.md).

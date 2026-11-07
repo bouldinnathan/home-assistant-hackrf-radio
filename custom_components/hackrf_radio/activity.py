@@ -59,6 +59,7 @@ class ActivityLog:
         self.source = source
         self.secrets = tuple(secrets) + tuple(v for k, v in os.environ.items() if SECRET_NAME.search(k) and v)
         self.retention = retention
+        self.important_retention = max(1, retention // 4)
         self._lock = threading.Lock()
         self._error = None
         self._recent = {}
@@ -78,6 +79,7 @@ class ActivityLog:
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA max_page_count=8192")
             connection.execute("CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, record TEXT NOT NULL)")
+            connection.execute("CREATE TABLE IF NOT EXISTS important (seq INTEGER PRIMARY KEY, record TEXT NOT NULL)")
         except BaseException:
             connection.close()
             raise
@@ -118,7 +120,11 @@ class ActivityLog:
                     try:
                         with connection:
                             connection.execute("DELETE FROM activity WHERE seq <= (SELECT COALESCE(MAX(seq),0)-? FROM activity)", (self.retention - 1,))
-                            connection.execute("INSERT INTO activity(record) VALUES (?)", (json.dumps(record, ensure_ascii=False),))
+                            raw = json.dumps(record, ensure_ascii=False)
+                            cursor = connection.execute("INSERT INTO activity(record) VALUES (?)", (raw,))
+                            if level in {"warning", "error"}:
+                                connection.execute("INSERT INTO important(seq,record) VALUES (?,?)", (cursor.lastrowid, raw))
+                                connection.execute("DELETE FROM important WHERE seq NOT IN (SELECT seq FROM important ORDER BY seq DESC LIMIT ?)", (self.important_retention,))
                         self._error = None
                     finally:
                         connection.close()
@@ -145,8 +151,9 @@ class ActivityLog:
                     try:
                         # Fixed retention bounds the work; filtering never treats
                         # user input as SQL or a regular expression.
-                        rows = connection.execute("SELECT seq,record FROM activity WHERE (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?",
-                                                  (before, before, self.retention)).fetchall()
+                        rows = connection.execute("SELECT seq,record FROM (SELECT seq,record FROM activity UNION SELECT seq,record FROM important) "
+                                                  "WHERE (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?",
+                                                  (before, before, self.retention + self.important_retention)).fetchall()
                         size = 0
                         for sequence, raw in rows:
                             record = json.loads(raw)
@@ -162,5 +169,6 @@ class ActivityLog:
                 except (OSError, sqlite3.Error, ValueError, KeyError, TypeError):
                     self._failed()
                 return {"records": records, "next_before": records[-1]["sequence"] if records else 0,
-                        "storage_error": self._error, "retention": self.retention}
+                        "storage_error": self._error, "retention": self.retention + self.important_retention,
+                        "recent_retention": self.retention, "important_retention": self.important_retention}
         return await asyncio.to_thread(read)

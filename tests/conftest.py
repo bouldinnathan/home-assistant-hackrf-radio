@@ -1,6 +1,25 @@
 """Shared realistic upstream CLI fixtures; no physical device is opened."""
 
+from importlib.util import find_spec
+
 import pytest
+
+
+@pytest.fixture
+def hass_config_dir(tmp_path):
+    directory = tmp_path / "ha_config"
+    directory.mkdir(exist_ok=True)
+    return str(directory)
+
+
+@pytest.fixture(autouse=True)
+def isolated_legacy_config(hass_config_dir, monkeypatch):
+    if find_spec("pytest_homeassistant") is None:
+        from pathlib import Path
+
+        from pytest_homeassistant_custom_component import common
+
+        monkeypatch.setattr(common, "get_test_config_dir", lambda *parts: str(Path(hass_config_dir).joinpath(*parts)))
 
 SERIAL = "0000000000000000a06063c8234e935f"
 INFO = f"""hackrf_info version: 2024.02.1

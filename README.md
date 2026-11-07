@@ -21,7 +21,7 @@ Read [the safety rationale, compatibility notes and upstream GitHub references](
 
 ## Installation
 
-Home Assistant **2025.1.4 or later** is required. The software is tested against 2025.1.4 and 2026.7.4. Physical hardware has not been available for this initial implementation; compatibility decisions are covered by simulated upstream tool output and actual subprocess/HTTP tests.
+Home Assistant **2025.1.4 or later** is required. The software is tested against 2025.1.4, 2026.7.4 and 2026.11.0. Physical hardware has not been available for this initial implementation; compatibility decisions are covered by simulated upstream tool output and actual subprocess/HTTP tests.
 
 ### HACS
 
@@ -36,9 +36,11 @@ Repository: [bouldinnathan/home-assistant-hackrf-radio](https://github.com/bould
 
 ### Manual
 
-Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.4.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
+Copy `custom_components/hackrf_radio` into `/config/custom_components/hackrf_radio`, restart HA, then add the integration through Settings. Alternatively, extract `dist/hackrf_radio-0.5.0.zip` into `/config/custom_components/`. The resulting manifest must be at `/config/custom_components/hackrf_radio/manifest.json`.
 
 ## Connecting the USB device
+
+For validated first-run credentials, non-root user programs, setup recovery and upgrade steps, see [First run and troubleshooting](docs/FIRST_RUN.md). The optional `scripts/setup_bridge.py` helper prepares a fresh `.env` without opening USB.
 
 ### Home Assistant OS: use the bridge
 
@@ -85,7 +87,7 @@ Open **Firmware maintenance** in the sidebar. Updates are explicitly started by 
 3. The USB host rechecks identity, saves and fsyncs a complete SPI backup and journal, rechecks identity again, writes with the tool's default compatibility protection, and reads back the entire flash. The image and erased tail must both match. No compatibility override or automatic reset is used.
 4. After **awaiting reset** appears, manually reset/reconnect the radio, select HackRF mode again if needed, and select **Verify boot after manual reset**. The exact serial, board ID, reported version and health must match. Only then is receiving unlocked; monitoring remains off.
 
-Reviewed targets in version 0.2.0 are **stock 2026.01.3** for standard HackRF One/Pro and **Mayhem v2.4.0** for their matching PortaPack configurations. This is a curated catalog, not permission to install arbitrary new GitHub releases. Nightly/custom versions, downgrades, equal-version reinstalls, stock/Mayhem conversion, pre-2021.03.1 CPLD migrations, DFU recovery, PortaRF and modified flash hardware require their upstream manual procedures. A PortaPack cannot be reliably detected physically over this USB interface; verify the hardware yourself before confirming.
+Reviewed targets are **stock 2026.01.3** for standard HackRF One/Pro and **Mayhem v2.4.0** for their matching PortaPack configurations. This is a curated catalog, not permission to install arbitrary new GitHub releases. Nightly/custom versions, downgrades, equal-version reinstalls, stock/Mayhem conversion, pre-2021.03.1 CPLD migrations, DFU recovery, PortaRF and modified flash hardware require their upstream manual procedures. A PortaPack cannot be reliably detected physically over this USB interface; verify the hardware yourself before confirming.
 
 Firmware maintenance requires official host tools **2026.01.3 or newer** and persistent storage. Local USB stores receipts and backups under `/config/.storage/hackrf_radio/firmware`; the Docker bridge uses `/var/lib/hackrf/firmware` in its named volume. The panel displays the relative backup filename and SHA256. Retain them. Updating an older bridge is necessary to enable firmware maintenance; receiving still works with a bridge that lacks these endpoints.
 
@@ -120,11 +122,13 @@ Set `HACKRF_APPS=soapy_remote,gqrx,cubicsdr,gnuradio,inspectrum` in `.env` to bu
 
 ## Your code, integrations and activity logs
 
+Version 0.5 fixes setup token-role checking, shared local-program ownership, stale-handoff recovery and log-health reporting. It adds connection reconfiguration, pre-entry setup diagnostics, protected warning/error history and `compose.user.yaml` for unprivileged user code. Invalid program profiles no longer block basic radio startup.
+
 Configure trusted programs on the USB host with `--custom-programs /absolute/path/programs.json`, or use `hackrf_radio_programs.json` in HA's configuration directory for local USB. Programs appear in the application selector and can be started/stopped from HA. Fixed commands run as an unprivileged account, with a restricted inherited environment. USB profiles acquire persistent exclusive ownership; offline/API profiles leave HA ownership intact and must avoid direct USB access. Commands cannot be uploaded or edited through a bridge/browser endpoint.
 
 Programs can optionally emit bounded measurements to `sensor.YOUR_RADIO_custom_result` and the `hackrf_radio_result` event. Use HA actions for scheduled sweeps/recordings, app control, saved receive profiles and external result reporting. Existing HA MQTT, Node-RED, webhook and notification integrations can consume those events; no additional integration is required for standalone code.
 
-**Activity & logs** shows persistent, filtered HA and USB-host history with UTC timestamps, correlated operation IDs, program stdout/stderr, exit codes and firmware phases. Each source retains 2,000 records with a bounded SQLite file. Noisy programs are rate limited, credentials and terminal controls are redacted, and filtered history can be exported as JSON. Storage failures are reported without interrupting firmware writes. Review arbitrary application output before sharing an export.
+**Activity & logs** shows persistent, filtered HA and USB-host history with UTC timestamps, correlated operation IDs, program stdout/stderr, exit codes and firmware phases. Each source retains 2,000 recent records plus up to 500 protected warnings/errors in a bounded SQLite database. Noisy programs are rate limited, credentials and terminal controls are redacted, and filtered history can be exported as JSON. Storage failures are reported without interrupting firmware writes. Review arbitrary application output before sharing an export.
 
 See [connection instructions, program profiles, HA actions, optional integrations and logging details](docs/HOME_ASSISTANT_WORKSPACE.md), including an [example profile](examples/programs.json) and [file-analysis program](examples/iq_analysis.py).
 
@@ -140,7 +144,7 @@ See [connection instructions, program profiles, HA actions, optional integration
 | Firmware recovery required | Retain the persistent backup/journal; inspect the failure and follow upstream recovery instructions |
 | Old/missing tool flags | Install current compatible host tools; the Docker bridge pins v2026.01.3 |
 | Authentication failure | Match the token in HA and the USB-host environment; reauthentication is supported |
-| Bridge address changed | Remove and re-add the integration with the new URL; the serial identity remains unchanged |
+| Bridge address changed | Use Reconfigure to update the URL/token; the same full serial is verified before saving |
 | Unexpected peaks or strong noise | Reduce IF/VGA gain; check antenna, filtering, nearby transmitters and input protection |
 | Settings rejected near 6 GHz | Account for the tool's 20 MHz sweep rounding; for example 5980–6000 MHz fits, while 5990–6000 MHz rounds beyond the limit |
 
@@ -150,12 +154,14 @@ See [connection instructions, program profiles, HA actions, optional integration
 uv venv --python 3.14 .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/ruff check .
-.venv/bin/pytest
+.venv/bin/python scripts/run_tests.py
 npm ci --ignore-scripts
 npm test
 python3 scripts/build_release.py
 ```
 
 Tests cover device variants, argument validation, subprocess lifetimes, bridge HTTP/authentication, HA config flows, complete entity/panel setup and unload, WebSocket authorization, stale measurements and frontend DOM behavior. Firmware tests exercise checksums/headers, identity changes, explicit confirmation, persistent backup, readback failure, cancellation, duplicate requests, restart recovery and full HA/bridge update flows using simulated flash storage. Real release downloads and all four image headers/hashes have also been checked without writing to hardware. The CI workflow tests the minimum HA version and builds the Docker image. A physical HackRF has not been available for a real flash/boot test.
+
+For the current HA 2026.11 test environment, create a separate virtual environment and install `requirements-current.txt`, then run `python scripts/run_tests.py` using that interpreter. November uses the official `pytest-homeassistant` helpers; older supported releases use their matching custom-component fixture package. Keep those environments separate. CI runs all three supported versions and tests the non-root image with an actual offline child program, result persistence and log reads.
 
 MIT licensed. HackRF and PortaPack names refer to their respective projects; this integration is independent of Great Scott Gadgets and the Mayhem project.

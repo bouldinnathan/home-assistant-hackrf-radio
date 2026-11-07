@@ -40,6 +40,27 @@ async function mount(t, overrides = {}) {
   return { window, panel, root: panel.shadowRoot, calls };
 }
 
+test("failed setup diagnostics are available before any radio exists and escape output", async (t) => {
+  const { root, calls } = await mount(t, { callWS: async (message) => {
+    if (message.type === "hackrf_radio/setup_activity") return { records: [{ timestamp: "2026-11-06", level: "warning", message: "<img src=x> Administrative token required" }] };
+    return [];
+  } });
+  assert.equal(root.querySelector("#empty").hidden, false);
+  root.querySelector("#setup-logs-empty").click();
+  await flush();
+  assert.equal(calls.at(-1).type, "hackrf_radio/setup_activity");
+  assert.equal(root.querySelector("#setup-log").hidden, false);
+  assert.match(root.querySelector("#setup-log-records").textContent, /Administrative token/);
+  assert.equal(root.querySelector("img"), null);
+});
+
+test("bad custom profiles show an actionable error without blocking receive controls", async (t) => {
+  const data = { ...structuredClone(sample), applications: { owner: { phase: "home_assistant" }, installer: { phase: "idle" }, catalog: [], profile_error: "Invalid programs.json" } };
+  const { root } = await mount(t, { data });
+  assert.match(root.querySelector("#program-status").textContent, /Custom programs disabled: Invalid programs.json/);
+  assert.equal(root.querySelector("#sweep").disabled, false);
+});
+
 test("HA workspace exposes custom programs, connection instructions and saved profiles", async (t) => {
   const data = { ...structuredClone(sample), user_presets: { Garden: settings }, result: { source: "user_decoder", timestamp: "2026-11-05T12:00:00Z", data: { temperature_c: 21.5 } } };
   const { root, calls } = await mount(t, { data });

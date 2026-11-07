@@ -12,11 +12,11 @@
       },
       "local": {
         "title": "Check local USB",
-        "description": "Install hackrf_info and hackrf_sweep inside the Home Assistant runtime and allow access to the USB device. For Home Assistant OS, use the bridge instead. Select Submit to discover accessible radios. A PortaPack must be in HackRF mode."
+        "description": "Install hackrf_info and hackrf_sweep inside the Home Assistant runtime and allow access to the USB device. For Home Assistant OS, use the bridge instead. Select Submit to discover accessible radios. A PortaPack must be in HackRF mode.\n\nLast check: {detail}"
       },
       "bridge": {
         "title": "Connect to the HackRF bridge",
-        "description": "Run the supplied bridge on the Linux computer with the HackRF attached. Enter its URL and HACKRF_BRIDGE_TOKEN. Use HTTPS on untrusted networks. The token stays on the Home Assistant backend.",
+        "description": "Run the bridge on the Linux computer with the HackRF attached. Use its reachable LAN address when HA runs elsewhere; 127.0.0.1 refers to the local network namespace. Enter HACKRF_BRIDGE_TOKEN (administrative), not HACKRF_RECEIVE_TOKEN. Use HTTPS on untrusted networks. Credentials stay on the HA backend.\n\nLast check: {detail}",
         "data": {
           "url": "Bridge URL (for example http://192.168.1.10:8099)",
           "token": "Bridge access token"
@@ -36,18 +36,38 @@
         "data": {
           "token": "Bridge access token"
         }
+      },
+      "recover": {
+        "title": "Return existing USB ownership",
+        "description": "This USB host is reserved for radio {serial}. Close external SDR applications and finish any firmware work first. Type that exact serial and confirm below. The optional Stop only targets a program started by this bridge. Ownership is returned only after a device identity and health check.\n\nLast check: {detail}",
+        "data": {
+          "serial_confirmation": "Full serial of the current USB owner",
+          "confirmed_closed": "All external USB connections are closed, or I explicitly choose to stop the managed program below",
+          "stop_managed_program": "Stop the program started by this bridge before returning USB"
+        }
+      },
+      "reconfigure": {
+        "title": "Update bridge connection",
+        "description": "Enter the new bridge URL and administrative HACKRF_BRIDGE_TOKEN. The configured full serial must still be present; existing device/entity identity and options are preserved. Wait for maintenance to finish first.\n\nLast check: {detail}",
+        "data": {
+          "url": "Bridge URL (for example http://192.168.1.10:8099)",
+          "token": "Bridge access token"
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot access a compatible HackRF. Check USB permissions, cable, bridge URL/logs, host tools, firmware support, other SDR apps and PortaPack HackRF mode. Reported incompatible firmware and failed self-tests block scanning.",
-      "invalid_auth": "The bridge rejected the access token.",
+      "invalid_auth": "Use the administrative HACKRF_BRIDGE_TOKEN. Receive-only tokens cannot configure Home Assistant.",
       "invalid_url": "Enter an HTTP(S) URL without embedded credentials, query or fragment.",
       "invalid_device": "Select an accessible compatible radio from the list.",
-      "safety_required": "Check the RF input and external DC protection before proceeding."
+      "safety_required": "Check the RF input and external DC protection before proceeding.",
+      "maintenance_busy": "The USB host is busy or has unfinished software maintenance. Wait for active work to finish, or inspect its maintenance status. Setup does not clear recovery journals.",
+      "recovery_failed": "USB control could not be returned. Check the serial, close external software, and review the last check. No ownership was forced."
     },
     "abort": {
       "already_configured": "This hardware serial number is already configured.",
-      "reauth_successful": "Bridge authentication updated."
+      "reauth_successful": "Bridge authentication updated.",
+      "reconfigure_successful": "Bridge connection updated; the configured radio identity was preserved."
     }
   },
   "options": {

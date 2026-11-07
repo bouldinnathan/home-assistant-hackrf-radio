@@ -48,7 +48,7 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
         operation = supplied_operation if re.fullmatch(r"[0-9a-f]{32}", supplied_operation) else uuid4().hex
         context = CURRENT_OPERATION.set(operation)
         path = request.match_info.route.resource.canonical if request.match_info.route.resource else "unknown"
-        quiet = path in {"/v1/activity", "/v1/devices"} or path.endswith("/{action}") and request.match_info.get("action") == "status"
+        quiet = path in {"/v1/activity", "/v1/devices", "/v1/setup"} or path.endswith("/{action}") and request.match_info.get("action") == "status"
         try:
             response = await handler(request)
             if not quiet:
@@ -81,6 +81,11 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
 
     async def devices(request):
         return result({"devices": await radio.devices()})
+
+    async def setup(request):
+        # Administrative authentication/ownership/tool checks without opening
+        # USB, including while external apps or firmware own the host.
+        return result({"setup": await radio.setup_status()})
 
     def operation_id(data: dict) -> str:
         value = data["operation_id"]
@@ -183,6 +188,7 @@ def create_app(token: str, radio: LocalRadio | None = None, firmware_directory: 
                                                              limit=int(request.query.get("limit", "200")), before=int(request.query.get("before", "0")))})
 
     app.router.add_get("/v1/devices", devices)
+    app.router.add_get("/v1/setup", setup)
     app.router.add_post("/v1/sweep", sweep)
     app.router.add_post("/v1/stop", stop)
     app.router.add_post("/v1/firmware/{action}", firmware)
@@ -204,6 +210,7 @@ def main() -> None:
     parser.add_argument("--allow-app-launch", action="store_true", help="Opt in to fixed software launch profiles on this USB host")
     parser.add_argument("--soapy-bind", default="127.0.0.1", help="SoapyRemote bind IP: loopback by default; a trusted private VPN/LAN IP requires firewall protection")
     parser.add_argument("--custom-programs", type=Path, help="USB-host JSON launch profiles; user programs require an unprivileged account")
+    parser.add_argument("--host-lock", type=Path, default=Path("/tmp/hackrf-radio-host.lock"), help="Shared empty process-lease file; all bridges on a USB host must use the same path")
     args = parser.parse_args()
     token = os.environ.get("HACKRF_BRIDGE_TOKEN", "")
     try:
@@ -212,7 +219,13 @@ def main() -> None:
                          receive_token=os.environ.get("HACKRF_RECEIVE_TOKEN", ""), soapy_bind=args.soapy_bind, profiles_path=args.custom_programs)
     except (ValueError, RadioError) as err:
         parser.error(str(err))
-    web.run_app(app, host=args.host, port=args.port, access_log=None, handler_cancellation=True)
+    from .host_lock import HostLease
+
+    try:
+        with HostLease(args.host_lock):
+            web.run_app(app, host=args.host, port=args.port, access_log=None, handler_cancellation=True)
+    except RadioError as err:
+        parser.error(str(err))
 
 
 if __name__ == "__main__":
